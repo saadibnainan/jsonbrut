@@ -1829,7 +1829,7 @@ DOM.scrollTop.addEventListener('click', () => { DOM.main.scrollTop = 0; });
 
 /* ── THEME ── */
 (function initTheme() {
-  const saved = localStorage.getItem('jsonbrut-theme') || 'light';
+  const saved = localStorage.getItem('jsonbrut-theme') || 'dark';
   applyTheme(saved);
 })();
 function applyTheme(theme) {
@@ -1839,7 +1839,7 @@ function applyTheme(theme) {
   localStorage.setItem('jsonbrut-theme', theme);
 }
 $('btn-theme-toggle').addEventListener('click', () => {
-  const current = document.documentElement.getAttribute('data-theme') || 'light';
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
   applyTheme(current === 'dark' ? 'light' : 'dark');
 });
 </script>
