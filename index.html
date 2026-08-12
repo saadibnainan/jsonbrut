@@ -2,11 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>JSONBRUT — Brutalist JSON Power Visualizer & Suite</title>
   <meta name="description" content="Neo-Brutalist JSON visualizer, diff tool, statistics dashboard, and inline editor in one zero-dependency file." />
   <meta http-equiv="X-Frame-Options" content="DENY" />
   <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+  <meta name="theme-color" content="#000000" id="meta-theme-color" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="JSONBRUT" />
+  <meta name="format-detection" content="telephone=no" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%230a0a0a'/><text x='50' y='67' font-family='Courier, monospace' font-weight='900' font-size='55' fill='%23ffe94a' text-anchor='middle'>%7B%7D</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" crossorigin="anonymous" />
@@ -22,6 +29,9 @@
       --clr-green:    #00c27a;
       --clr-purple:   #9b00ff;
       --clr-border:   #0a0a0a;
+      /* App chrome (topbar, bottom nav, toasts) stays dark in both themes —
+         --clr-black inverts under [data-theme="dark"], this must not. */
+      --clr-chrome:   #0a0a0a;
       --shadow-sm:    3px 3px 0 #0a0a0a;
       --shadow-md:    5px 5px 0 #0a0a0a;
       --shadow-lg:    8px 8px 0 #0a0a0a;
@@ -32,7 +42,17 @@
       --font-mono:    'Space Mono', 'Courier New', monospace;
       --sidebar-w:    320px;
       --topbar-h:     64px;
+      --bottomnav-h:  0px;
+      --tabstrip-h:   0px;
+      --safe-top:     env(safe-area-inset-top, 0px);
+      --safe-bottom:  env(safe-area-inset-bottom, 0px);
+      --safe-left:    env(safe-area-inset-left, 0px);
+      --safe-right:   env(safe-area-inset-right, 0px);
+      /* Full viewport height that survives mobile browser chrome collapse.
+         JS keeps this in sync for browsers without dvh support. */
+      --app-h:        100vh;
     }
+    @supports (height: 100dvh) { :root { --app-h: 100dvh; } }
 
     [data-theme="dark"] {
       --clr-bg:       #141414;
@@ -44,6 +64,7 @@
       --clr-blue:     #5b8fff;
       --clr-green:    #00e68a;
       --clr-purple:   #c87aff;
+      --clr-chrome:   #000000;
       --shadow-sm:    3px 3px 0 #f0ebe0;
       --shadow-md:    5px 5px 0 #f0ebe0;
       --shadow-lg:    8px 8px 0 #f0ebe0;
@@ -106,6 +127,7 @@
     [data-theme="dark"] #palette-overlay           { background: rgba(0,0,0,0.85); }
     [data-theme="dark"] .btn-white                 { background: #2a2a2a; color: var(--clr-text); border-color: var(--clr-border); }
     [data-theme="dark"] .btn-yellow                { background: var(--clr-yellow); color: #000; }
+    [data-theme="dark"] .btn-black                 { background: #000; color: var(--clr-yellow); border-color: var(--clr-yellow); }
     [data-theme="dark"] .tab-item                  { background: #222; color: #aaa; border-color: var(--clr-border); }
     [data-theme="dark"] .tab-item.active           { background: var(--clr-yellow); color: #000; }
     [data-theme="dark"] .stat-card                 { background: var(--clr-surface); border-color: var(--clr-border); }
@@ -114,23 +136,42 @@
     [data-theme="dark"] .diff-removed              { background: rgba(255, 59, 59, 0.2); color: #ff6b6b; }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { scroll-behavior: smooth; }
+    html {
+      scroll-behavior: smooth;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
     body {
       font-family: var(--font-body);
       background: var(--clr-bg);
       color: var(--clr-black);
       min-height: 100vh;
       overflow-x: hidden;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: none;
+    }
+    /* Every internal scroller gets momentum + scroll containment so a phone
+       never rubber-bands the whole page while scrolling a panel. */
+    #main, #sidebar, #messages-list, #table-wrapper, #tree-container,
+    #stats-view, #raw-container, #diff-view, #palette-list, #modal-box, #schema-tree {
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    button, .btn, .tab-item, .sidebar-item, .tree-toggle, .palette-item,
+    .crumb, #drop-zone, .diff-drop-box, #data-table th {
+      touch-action: manipulation;
     }
 
     /* ── TOPBAR & TABS ── */
     #topbar {
       position: fixed; top: 0; left: 0; right: 0;
-      height: var(--topbar-h);
+      height: calc(var(--topbar-h) + var(--safe-top));
+      padding-top: var(--safe-top);
       background: var(--clr-black);
       border-bottom: 4px solid var(--clr-yellow);
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0 20px; z-index: 1000; gap: 12px;
+      padding-left: calc(20px + var(--safe-left)); padding-right: calc(20px + var(--safe-right));
+      z-index: 1000; gap: 12px;
     }
     #logo {
       font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700;
@@ -192,7 +233,12 @@
     }
 
     /* ── LAYOUT & SIDEBAR RESIZER ── */
-    #app-shell { display: flex; margin-top: var(--topbar-h); height: calc(100vh - var(--topbar-h)); position: relative; }
+    #app-shell {
+      display: flex; position: relative;
+      margin-top: calc(var(--topbar-h) + var(--safe-top) + var(--tabstrip-h));
+      height: calc(var(--app-h) - var(--topbar-h) - var(--safe-top) - var(--tabstrip-h)
+                   - var(--bottomnav-h) - var(--safe-bottom));
+    }
 
     #sidebar {
       width: var(--sidebar-w); min-width: 220px; max-width: 600px;
@@ -314,6 +360,8 @@
       border-bottom: var(--border); background: var(--clr-surface); font-family: var(--font-mono); font-size: 0.75rem;
     }
     #breadcrumb-trail { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    /* Kept in the stylesheet (not inline) so the mobile icon-only rule can win. */
+    #btn-copy-path { padding: 3px 8px; font-size: 0.65rem; }
     .crumb { cursor: pointer; font-weight: 700; text-decoration: underline; outline: none; }
     .crumb:focus-visible { outline: 2px dashed var(--clr-blue); outline-offset: 2px; }
     .crumb-sep { opacity: 0.4; }
@@ -474,11 +522,14 @@
     #raw-container { flex: 1; overflow: auto; background: #111; color: #e8e2d6; font-family: var(--font-mono); font-size: 0.8rem; display: flex; }
     #raw-line-numbers { padding: 14px 10px; background: #080808; color: #555; text-align: right; user-select: none; border-right: 1.5px solid #222; }
     #raw-code { padding: 14px; white-space: pre; overflow-x: auto; flex: 1; }
+    #raw-container.wrap #raw-code { white-space: pre-wrap; overflow-wrap: anywhere; }
 
     /* DIFF VIEW */
     #diff-view { display: none; flex-direction: column; height: 100%; overflow-y: auto; padding: 20px; gap: 16px; }
     .diff-drop-container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .diff-drop-box { border: var(--border-thick); border-style: dashed; padding: 24px; text-align: center; cursor: pointer; background: var(--clr-surface); }
+    .diff-drop-box { border: var(--border-thick); border-style: dashed; padding: 24px; text-align: center; cursor: pointer; background: var(--clr-surface); outline: none; }
+    .diff-drop-box.drag-over, .diff-drop-box:focus-visible { background: var(--clr-yellow); color: #000; }
+    [data-theme="dark"] .diff-drop-box.drag-over { background: #2a2500; color: var(--clr-yellow); }
     #diff-output { border: var(--border-thick); background: var(--clr-surface); box-shadow: var(--shadow-md); font-family: var(--font-mono); font-size: 0.8rem; }
     .diff-line { padding: 4px 12px; white-space: pre-wrap; word-break: break-all; border-bottom: 1px solid #eee; }
     .diff-added { background: #e6ffed; color: #1a7f37; font-weight: 700; }
@@ -497,7 +548,9 @@
 
     #modal-overlay, #palette-overlay {
       display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
-      z-index: 900; align-items: center; justify-content: center; padding: 20px;
+      /* Above the topbar (1000) so bottom sheets are not clipped by the
+         mobile tab bar, which lives inside the topbar's stacking context. */
+      z-index: 1200; align-items: center; justify-content: center; padding: 20px;
     }
     #modal-overlay.open, #palette-overlay.open { display: flex; }
     #modal-box, #palette-box {
@@ -529,152 +582,397 @@
     }
     .palette-item:hover, .palette-item.selected { background: var(--clr-yellow); color: #000; font-weight: 700; }
 
-    /* ── MOBILE: SMALL PHONES (≤480px) ── */
-    @media (max-width: 480px) {
-      :root { --sidebar-w: 100vw; --topbar-h: 56px; }
+    /* ── MOBILE-ONLY COMPONENTS (inert on desktop) ── */
+    #sidebar-backdrop {
+      /* Starts below the topbar so the header stays live — tapping ☰ again,
+         or anywhere on the dimmed content, closes the drawer. */
+      position: fixed; top: calc(var(--topbar-h) + var(--safe-top));
+      left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.55); z-index: 1050;
+      opacity: 0; pointer-events: none; transition: opacity 0.24s ease;
+      -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+    }
+    body.drawer-open #sidebar-backdrop { opacity: 1; pointer-events: auto; }
+    #sidebar-close, #btn-cmd, #table-mobile-bar, .sheet-handle { display: none; }
 
-      /* Topbar: compact */
-      #topbar { padding: 0 10px; gap: 6px; }
-      #logo { font-size: 1rem; }
+    /* Toasts replace blocking alert() dialogs — native-feeling, non-modal */
+    #toast-host {
+      position: fixed; left: 0; right: 0;
+      bottom: calc(var(--bottomnav-h) + var(--safe-bottom) + 18px);
+      z-index: 1400; display: flex; flex-direction: column-reverse;
+      align-items: center; gap: 8px; padding: 0 16px; pointer-events: none;
+    }
+    .toast {
+      max-width: 520px; width: fit-content;
+      font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 0.03em; padding: 11px 15px;
+      background: var(--clr-chrome); color: var(--clr-yellow);
+      border: 2.5px solid var(--clr-yellow); box-shadow: 4px 4px 0 rgba(0,0,0,0.4);
+      animation: toast-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+      overflow-wrap: anywhere;
+    }
+    .toast.err { background: var(--clr-red); color: #fff; border-color: #fff; }
+    .toast.out { animation: toast-out 0.18s ease forwards; }
+    @keyframes toast-in  { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+    @keyframes toast-out { to { transform: translateY(10px); opacity: 0; } }
+
+    /* Card renderer for tabular data on narrow screens */
+    #table-cards { display: none; flex: 1; overflow-y: auto; padding: 12px; gap: 12px; flex-direction: column; }
+    .row-card { border: var(--border-thick); background: var(--clr-surface); box-shadow: var(--shadow-sm); }
+    .row-card-head {
+      background: var(--clr-black); color: var(--clr-yellow); font-family: var(--font-mono);
+      font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 9px 11px; display: flex; justify-content: space-between; gap: 10px;
+    }
+    .row-card-head span:last-child { opacity: 0.7; flex-shrink: 0; }
+    .rc-field {
+      display: grid; grid-template-columns: minmax(84px, 36%) 1fr; gap: 10px;
+      padding: 9px 11px; border-bottom: 1.5px solid #e8e2d6; align-items: start;
+    }
+    .rc-field:last-child { border-bottom: none; }
+    .rc-key {
+      font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.65; overflow-wrap: anywhere;
+    }
+    .rc-val { font-size: 0.8rem; overflow-wrap: anywhere; line-height: 1.45; }
+    [data-theme="dark"] .row-card { background: var(--clr-surface); }
+    [data-theme="dark"] .row-card-head { background: #000; }
+    [data-theme="dark"] .rc-field { border-bottom-color: #2a2a2a; }
+    #table-cards-empty { font-family: var(--font-mono); font-size: 0.78rem; padding: 24px 12px; text-align: center; opacity: 0.7; }
+
+    /* Collapsible schema panel (keeps the drawer usable on short screens) */
+    #schema-head { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    #schema-toggle {
+      background: none; border: none; font: inherit; font-weight: 700; cursor: pointer;
+      color: inherit; display: flex; align-items: center; gap: 6px; padding: 2px 0; flex: 1; text-align: left;
+    }
+    #schema-caret { display: inline-block; transition: transform 0.18s; font-size: 0.6rem; }
+    #schema-panel.collapsed #schema-caret { transform: rotate(-90deg); }
+    #schema-panel.collapsed #schema-tree { display: none; }
+
+    /* ══════════════════════════════════════════════════════════════════
+       MOBILE APP SHELL (≤768px)
+       The desktop chrome does not survive a 390px viewport, so phones get
+       a different shell: topbar keeps identity + actions, view switching
+       moves to a fixed bottom tab bar, and the sidebar becomes a drawer.
+       ══════════════════════════════════════════════════════════════════ */
+    @media (max-width: 768px),
+           (max-height: 500px) and (orientation: landscape) and (pointer: coarse) {
+      :root {
+        --topbar-h:    52px;
+        --bottomnav-h: 58px;
+        --sidebar-w:   min(86vw, 360px);
+      }
+
+      /* Never let a phone zoom on focus: iOS zooms below 16px. */
+      #sidebar-search, #table-search, #tree-search, #palette-search,
+      #paste-input, #url-input, #table-sort, .tree-edit-input { font-size: 16px; }
+
+      /* ── TOPBAR ── */
+      #topbar {
+        padding-left: calc(12px + var(--safe-left));
+        padding-right: calc(12px + var(--safe-right));
+        gap: 8px; border-bottom-width: 3px;
+      }
+      #logo { font-size: 1.05rem; }
       #logo span { display: none; }
-      #tab-bar { max-width: 90px; gap: 4px; }
-      .tab-item { font-size: 0.6rem; padding: 4px 6px; }
 
-      /* Topbar actions: wrap into two rows */
-      #topbar-actions { flex-wrap: wrap; gap: 4px; justify-content: flex-end; max-width: 55%; }
-      #view-toggle-group { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; max-width: 100%; }
-      #view-toggle-group::-webkit-scrollbar { display: none; }
-      #view-toggle-group .btn { padding: 5px 7px; font-size: 0.55rem; }
-      .btn { padding: 5px 8px; font-size: 0.6rem; }
+      #topbar-actions { gap: 6px; flex-wrap: nowrap; margin-left: auto; }
+      #topbar-actions .btn {
+        width: 38px; height: 38px; min-height: 38px; padding: 0;
+        justify-content: center; box-shadow: 2px 2px 0 var(--clr-border);
+      }
+      /* #btn-copy-path is listed by id so it outranks its own id-level sizing rule. */
+      .btn[data-icon], #btn-copy-path { font-size: 0; letter-spacing: 0; }
+      .btn[data-icon]::before { content: attr(data-icon); font-size: 0.95rem; letter-spacing: 0; }
+      #btn-share { display: none; } /* reachable from the command sheet */
+      #btn-cmd { display: inline-flex; }
+      #edit-indicator { font-size: 0.55rem; padding: 3px 5px; }
 
-      /* Hide text labels on small buttons, keep emoji */
-      #btn-share { font-size: 0; }
-      #btn-share::before { content: '🔗'; font-size: 0.85rem; }
-      #btn-load-new { font-size: 0; }
-      #btn-load-new::before { content: '↑'; font-size: 0.85rem; }
+      /* ── FILE TABS: own scrollable strip below the topbar ── */
+      #tab-bar {
+        position: fixed; top: calc(var(--topbar-h) + var(--safe-top)); left: 0; right: 0;
+        height: var(--tabstrip-h); max-width: none; z-index: 999;
+        background: var(--clr-surface); border-bottom: var(--border);
+        padding-left: calc(8px + var(--safe-left)); padding-right: calc(8px + var(--safe-right));
+        gap: 6px; overflow-x: auto; overflow-y: hidden; align-items: center;
+      }
+      .tab-item { font-size: 0.62rem; padding: 6px 8px; flex-shrink: 0; }
 
-      /* Sidebar: full-screen overlay */
-      #sidebar { position: fixed; top: var(--topbar-h); left: 0; bottom: 0; z-index: 100; width: 100vw; }
+      /* ── BOTTOM TAB BAR (view switcher) ── */
+      #view-toggle-group {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+        height: calc(var(--bottomnav-h) + var(--safe-bottom));
+        padding-bottom: var(--safe-bottom);
+        padding-left: var(--safe-left); padding-right: var(--safe-right);
+        display: flex; overflow: hidden;
+        background: var(--clr-chrome); border: none; border-top: 3px solid var(--clr-yellow);
+      }
+      #view-toggle-group .btn {
+        position: relative; flex: 1 1 0; min-width: 0; height: 100%; min-height: 0;
+        padding: 0; gap: 3px; border: none; border-right: 1px solid #2e2e2e;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        font-size: 0.48rem; letter-spacing: 0.02em;
+        background: transparent; color: #8a8a8a; box-shadow: none;
+      }
+      #view-toggle-group .btn::before {
+        content: attr(data-icon); font-size: 1.02rem; line-height: 1;
+        font-family: var(--font-body); font-weight: 400;
+      }
+      #view-toggle-group .btn:last-child { border-right: none; }
+      #view-toggle-group .btn:not(.active),
+      #view-toggle-group .btn:hover:not(.active) { background: transparent; color: #8a8a8a; }
+      #view-toggle-group .btn.active { background: transparent; color: var(--clr-yellow); }
+      #view-toggle-group .btn.active::after {
+        content: ''; position: absolute; top: 0; left: 14%; right: 14%;
+        height: 3px; background: var(--clr-yellow);
+      }
+      #view-toggle-group .btn:active { background: #1c1c1c; }
+
+      /* ── SIDEBAR AS OFF-CANVAS DRAWER ── */
+      #sidebar {
+        position: fixed; top: calc(var(--topbar-h) + var(--safe-top)); left: 0; bottom: 0;
+        width: var(--sidebar-w); min-width: 0; max-width: 100vw; z-index: 1100;
+        padding-left: var(--safe-left);
+        overflow: hidden; /* inner list scrolls instead */
+        transform: translateX(-102%);
+        transition: transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      #sidebar.hidden { display: flex; }            /* .hidden is desktop-only semantics */
+      #sidebar.dragging { transition: none; }
+      body.drawer-open #sidebar { transform: none; box-shadow: 12px 0 34px rgba(0,0,0,0.4); }
+      body.drawer-open { overflow: hidden; }
       #sidebar-resizer { display: none; }
+      #sidebar-list { flex: 1; overflow-y: auto; min-height: 0; }
+      #sidebar-close {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 26px; height: 26px; background: var(--clr-red); color: #fff;
+        border: none; font-family: var(--font-mono); font-weight: 700; font-size: 0.85rem; cursor: pointer;
+      }
+      #sidebar-header { gap: 10px; }
+      #sidebar-count { margin-left: auto; }
+      #schema-panel { padding-bottom: calc(14px + var(--safe-bottom)); flex-shrink: 0; }
+      #schema-tree { max-height: 34vh; }
 
-      /* Landing */
-      #landing { padding: 20px 12px; gap: 16px; }
-      #drop-zone { padding: 24px 16px; box-shadow: var(--shadow-md); }
-      #drop-zone-icon { font-size: 2.5rem; }
-      #drop-zone h2 { font-size: 1.2rem; }
-      #drop-zone p { font-size: 0.7rem; }
-      #input-methods { grid-template-columns: 1fr; gap: 12px; }
-      #paste-input { height: 80px; }
+      /* ── LANDING ── */
+      #landing { padding: 22px 14px calc(22px + var(--safe-bottom)); gap: 18px; }
+      #drop-zone { padding: 30px 18px; box-shadow: var(--shadow-md); }
+      #drop-zone-icon { font-size: 2.6rem; }
+      #drop-zone h2 { font-size: 1.25rem; }
+      #drop-zone p { font-size: 0.74rem; margin-bottom: 16px; }
+      #input-methods { grid-template-columns: 1fr; gap: 16px; }
+      #paste-input { height: 96px; box-shadow: var(--shadow-sm); }
+      #url-input { height: 48px; box-shadow: var(--shadow-sm); }
+      .input-btn-row .btn { flex: 1; justify-content: center; }
 
-      /* Content area */
-      #breadcrumb-bar { padding: 6px 10px; font-size: 0.65rem; }
-      .crumb { font-size: 0.65rem; }
-      #stats-bar { padding: 6px 10px; font-size: 0.6rem; gap: 8px; }
+      /* ── CONTENT CHROME ── */
+      /* The crumb trail only says anything in the tree view — everywhere else
+         it is a permanent "root" costing 40px of a 660px screen. */
+      #breadcrumb-bar { display: none; padding: 5px 12px; font-size: 0.68rem; gap: 8px; }
+      #content-area.show-crumbs #breadcrumb-bar { display: flex; }
+      #breadcrumb-bar .btn { padding: 8px 10px; }
+      #breadcrumb-trail { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+      #breadcrumb-trail::-webkit-scrollbar { display: none; }
+      #btn-copy-path { flex-shrink: 0; }
+      #stats-bar {
+        padding: 7px 12px; font-size: 0.62rem; gap: 12px;
+        flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+      }
+      #stats-bar::-webkit-scrollbar { display: none; }
+      .stat-pill { flex-shrink: 0; }
+      #error-bar { padding: 11px 14px; font-size: 0.74rem; }
 
-      /* Chat */
-      #chat-header { padding: 12px 14px; }
-      #chat-title { font-size: 1rem; }
-      #messages-list { padding: 12px; gap: 12px; }
-      .msg-bubble { padding: 10px 12px; font-size: 0.82rem; max-width: 85vw; }
-      .msg-avatar { width: 28px; height: 28px; min-width: 28px; font-size: 0.55rem; }
-      .message-row { gap: 8px; }
+      /* ── CHAT ── */
+      #chat-header { padding: 13px 14px; }
+      #chat-title { font-size: 1.05rem; }
+      #chat-summary { font-size: 0.78rem; max-height: 62px; }
+      #messages-list { padding: 14px 12px; gap: 14px; }
+      .message-row { gap: 8px; max-width: 100%; }
+      .msg-bubble { padding: 11px 13px; font-size: 0.85rem; max-width: calc(100vw - 76px); box-shadow: var(--shadow-sm); }
+      .msg-avatar { width: 28px; height: 28px; min-width: 28px; font-size: 0.52rem; box-shadow: none; }
+      .msg-code-block code { font-size: 0.72rem; }
+      .meta-chip { font-size: 0.6rem; }
 
-      /* Table */
-      #table-controls { padding: 8px 10px; gap: 6px; }
-      #table-search { min-width: 120px; font-size: 0.7rem; padding: 6px 8px; }
-      #data-table th { padding: 8px 8px; font-size: 0.6rem; }
-      #data-table td { padding: 6px 8px; font-size: 0.72rem; max-width: 160px; }
-      #pagination { padding: 8px 10px; }
+      /* ── TABLE ──
+         Two compact rows instead of four stacked bars: the phone needs the
+         vertical space for data, not for chrome. */
+      #table-controls { padding: 9px 12px 8px; gap: 8px; flex-wrap: nowrap; }
+      #table-search { flex: 1; min-width: 0; box-shadow: none; padding: 9px 10px; }
+      #table-controls .btn { flex-shrink: 0; box-shadow: 2px 2px 0 var(--clr-border); }
+      #table-info { display: none; } /* row + page counts already live in the stats bar and pager */
+      #table-mobile-bar {
+        display: flex; gap: 8px; align-items: center; padding: 0 12px 9px;
+        background: var(--clr-surface); border-bottom: var(--border);
+      }
+      #table-sort {
+        flex: 1; min-width: 0; font-family: var(--font-mono); padding: 9px 10px;
+        border: var(--border); background: var(--clr-bg); color: var(--clr-text);
+      }
+      #table-mobile-bar .btn { flex-shrink: 0; height: 40px; }
+      #data-table th { padding: 10px; font-size: 0.62rem; }
+      #data-table td { padding: 9px 10px; font-size: 0.75rem; max-width: 180px; }
+      #pagination {
+        padding: 10px 12px calc(10px + 0px); gap: 10px; justify-content: center;
+      }
+      #pagination .btn { flex: 1; justify-content: center; }
+      #page-info { flex-shrink: 0; }
+      #export-dropdown { right: 0; min-width: 150px; }
 
-      /* Tree */
-      #tree-toolbar { padding: 8px 10px; gap: 6px; }
-      #tree-search { min-width: 120px; font-size: 0.7rem; }
-      #tree-container { padding: 10px 12px; font-size: 0.75rem; }
-      .tree-children { padding-left: 14px; }
+      /* ── TREE ── */
+      #tree-toolbar { padding: 9px 12px; gap: 8px; }
+      #tree-search { flex: 1 1 100%; min-width: 0; box-shadow: none; padding: 9px 10px; }
+      #tree-toolbar .btn { flex: 1; justify-content: center; }
+      #tree-container { padding: 12px 12px 20px; font-size: 0.8rem; }
+      .tree-children { padding-left: 13px; margin-left: 4px; }
+      .tree-toggle { padding: 5px 0; }
+      .tree-node > span { display: block; padding: 4px 0; overflow-wrap: anywhere; }
 
-      /* Stats */
-      #stats-view { padding: 14px; gap: 14px; }
+      /* ── STATS ── */
+      #stats-view { padding: 14px 12px 20px; gap: 14px; }
       .stats-grid { grid-template-columns: 1fr; gap: 12px; }
-      .stat-canvas { height: 120px; }
+      .stat-card { padding: 14px; box-shadow: var(--shadow-sm); }
+      .stat-canvas { height: 150px; }
 
-      /* Raw */
-      #raw-container { font-size: 0.7rem; }
-      #raw-line-numbers { padding: 10px 6px; font-size: 0.65rem; }
-      #raw-code { padding: 10px; }
+      /* ── RAW ── */
+      #raw-toolbar { padding: 9px 12px; gap: 8px; flex-wrap: wrap; }
+      #raw-toolbar .btn { flex: 1; justify-content: center; }
+      #raw-container { font-size: 0.72rem; }
+      #raw-line-numbers { padding: 12px 8px; font-size: 0.66rem; }
+      #raw-code { padding: 12px; }
+      #raw-container.wrap #raw-code { white-space: pre-wrap; overflow-wrap: anywhere; }
 
-      /* Diff */
-      #diff-view { padding: 12px; gap: 12px; }
+      /* ── DIFF ── */
+      #diff-view { padding: 12px 12px 20px; gap: 12px; }
       .diff-drop-container { grid-template-columns: 1fr; gap: 10px; }
-      .diff-drop-box { padding: 16px; }
+      .diff-drop-box { padding: 18px; }
+      .diff-line { padding: 5px 10px; font-size: 0.72rem; }
 
-      /* Modal */
-      #modal-overlay, #palette-overlay { padding: 10px; }
-      #modal-box, #palette-box { max-height: 90vh; }
-      #modal-body { padding: 12px; font-size: 0.75rem; }
+      /* ── MODAL & PALETTE AS BOTTOM SHEETS ── */
+      #modal-overlay, #palette-overlay { align-items: flex-end; padding: 0; }
+      #modal-box, #palette-box {
+        max-width: 100%; max-height: 86vh; max-height: 86dvh;
+        border-left: none; border-right: none; border-bottom: none;
+        box-shadow: none; animation: sheet-up 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+        padding-bottom: var(--safe-bottom);
+      }
+      .sheet-handle {
+        display: block; width: 46px; height: 5px; margin: 8px auto 4px;
+        background: var(--clr-border); opacity: 0.45; flex-shrink: 0;
+      }
+      #modal-header, #palette-header { padding: 11px 14px; font-size: 0.7rem; }
+      #modal-close { width: 32px; height: 32px; font-size: 1rem; }
+      #modal-body { padding: 14px; font-size: 0.78rem; }
+      #palette-list { flex: 1; max-height: none; }
+      .palette-item { padding: 15px 16px; font-size: 0.82rem; }
+      @keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
 
-      /* Scroll top */
-      #scroll-top { width: 38px; height: 38px; bottom: 16px; right: 16px; font-size: 1rem; }
+      /* ── FLOATING SCROLL-TOP (clears the tab bar) ── */
+      #scroll-top {
+        width: 42px; height: 42px; font-size: 1.05rem;
+        right: calc(14px + var(--safe-right));
+        bottom: calc(var(--bottomnav-h) + var(--safe-bottom) + 14px);
+      }
     }
 
-    /* ── TABLETS (481px – 768px) ── */
-    @media (min-width: 481px) and (max-width: 768px) {
-      :root { --sidebar-w: 100vw; }
-
-      #logo span { display: none; }
-      #tab-bar { max-width: 140px; }
-
-      /* Sidebar: full-screen overlay */
-      #sidebar { position: fixed; top: var(--topbar-h); left: 0; bottom: 0; z-index: 100; }
-      #sidebar-resizer { display: none; }
-
-      /* Topbar actions */
-      #topbar-actions { gap: 6px; flex-wrap: wrap; }
-      #view-toggle-group { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-      #view-toggle-group::-webkit-scrollbar { display: none; }
-      #view-toggle-group .btn { padding: 6px 9px; font-size: 0.6rem; }
-
-      /* Landing */
-      #input-methods { grid-template-columns: 1fr; }
-      #drop-zone { padding: 32px 24px; }
-
-      /* Stats */
-      .stats-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-
-      /* Diff */
-      .diff-drop-container { grid-template-columns: 1fr; }
-
-      /* Chat */
-      .msg-bubble { max-width: 75vw; }
+    /* ── SMALL PHONES (≤400px): tighten further ── */
+    @media (max-width: 400px) {
+      #logo { font-size: 0.95rem; }
+      #topbar-actions { gap: 4px; }
+      #topbar-actions .btn { width: 34px; height: 34px; min-height: 34px; }
+      .btn[data-icon]::before { font-size: 0.85rem; }
+      #view-toggle-group .btn { font-size: 0.44rem; }
+      #view-toggle-group .btn::before { font-size: 0.95rem; }
+      #drop-zone h2 { font-size: 1.1rem; }
+      .msg-bubble { max-width: calc(100vw - 68px); }
+      .rc-field { grid-template-columns: minmax(72px, 40%) 1fr; }
     }
 
-    /* ── SMALL LAPTOPS (769px – 1024px) ── */
+    /* ── LANDSCAPE PHONES: reclaim vertical space ── */
+    @media (max-width: 900px) and (max-height: 480px) and (orientation: landscape) {
+      :root { --topbar-h: 46px; --bottomnav-h: 48px; }
+      #view-toggle-group .btn { flex-direction: row; gap: 6px; font-size: 0.5rem; }
+      #view-toggle-group .btn::before { font-size: 0.85rem; }
+      #landing { padding: 14px; }
+      #drop-zone { padding: 18px 16px; }
+      #drop-zone-icon { font-size: 1.8rem; margin-bottom: 6px; }
+      #input-methods { grid-template-columns: 1fr 1fr; }
+      #modal-box, #palette-box { max-height: 92vh; max-height: 92dvh; }
+
+      /* ~390px of height, so every bar gives back what it can.
+         Selectors stay id-scoped to outrank the touch-target block below. */
+      #stats-bar { padding: 3px 10px; font-size: 0.58rem; }
+      #breadcrumb-bar { padding: 2px 10px; font-size: 0.62rem; }
+      #chat-header { padding: 8px 12px; }
+      #chat-summary { max-height: 40px; }
+      #table-controls { padding: 6px 10px 5px; }
+      #table-mobile-bar { padding: 0 10px 6px; }
+      #tree-toolbar, #raw-toolbar { padding: 6px 10px; }
+      #pagination { padding: 6px 10px; }
+      #table-search, #table-sort, #tree-search,
+      #table-controls .btn, #table-mobile-bar .btn, #breadcrumb-bar .btn,
+      #tree-toolbar .btn, #raw-toolbar .btn, #pagination .btn {
+        height: 36px; min-height: 36px; padding-top: 0; padding-bottom: 0;
+      }
+      #table-mobile-bar { display: none; } /* grid headers sort by tap in landscape */
+      #breadcrumb-bar .btn { height: 28px; min-height: 28px; }
+      #messages-list { padding: 10px 12px; gap: 10px; }
+      #tree-container { padding: 8px 12px; }
+      #stats-view { padding: 10px 12px; gap: 10px; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+      .stat-canvas { height: 120px; }
+    }
+
+    /* ── TABLETS (769px – 1024px) ── */
     @media (min-width: 769px) and (max-width: 1024px) {
       :root { --sidebar-w: 260px; }
-      #tab-bar { max-width: 200px; }
+      #logo span { display: none; }
+      #tab-bar { max-width: 180px; }
       #topbar-actions { gap: 6px; }
       .btn { padding: 6px 10px; font-size: 0.65rem; }
-      #view-toggle-group .btn { padding: 6px 9px; }
+      #view-toggle-group .btn { padding: 6px 8px; font-size: 0.6rem; }
+      .stats-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
     }
 
-    /* ── TOUCH DEVICE ENHANCEMENTS ── */
+    /* ── TOUCH DEVICES: bigger targets, no phantom hovers ── */
     @media (hover: none) and (pointer: coarse) {
-      /* Larger touch targets */
-      .btn { min-height: 40px; min-width: 40px; }
-      .sidebar-item { padding: 14px 16px; }
-      .tab-item { padding: 8px 12px; }
-      .tree-toggle { padding: 6px 0; }
-      #sidebar-search, #table-search, #tree-search { padding: 12px 14px; font-size: 0.85rem; }
-      #data-table td { padding: 10px 12px; }
-      #data-table th { padding: 12px; }
-      .palette-item { padding: 14px 16px; }
+      .btn { min-height: 42px; }
+      #view-toggle-group .btn { min-height: 0; }
+      .sidebar-item { padding: 15px 16px; }
+      .tab-item { padding: 9px 12px; }
+      .tree-toggle { padding: 7px 0; }
+      .tree-val-str, .tree-val-num, .tree-val-bool, .tree-val-null { padding: 3px 2px; }
+      #sidebar-search, #table-search, #tree-search { padding: 12px 14px; }
+      #data-table td { padding: 12px; }
+      #data-table th { padding: 13px 12px; }
+      .palette-item { padding: 15px 16px; }
+      .crumb { padding: 4px 2px; }
+      #modal-close, #sidebar-close { min-width: 32px; min-height: 32px; }
 
-      /* Disable hover-only effects (no phantom hovers on touch) */
+      /* Hover styling is meaningless on touch — use pressed states instead. */
       .btn:hover { transform: none; box-shadow: var(--shadow-sm); }
+      .btn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--clr-border); }
       .sidebar-item:hover { background: inherit; color: inherit; }
+      .sidebar-item:active { background: var(--clr-yellow); color: #000; }
       .sidebar-item.active { background: var(--clr-black); color: var(--clr-yellow); }
-      #drop-zone:hover { background: var(--clr-surface); transform: none; }
+      .palette-item:hover { background: inherit; color: inherit; }
+      .palette-item:active, .palette-item.selected { background: var(--clr-yellow); color: #000; }
+      #drop-zone:hover { background: var(--clr-surface); transform: none; box-shadow: var(--shadow-md); }
+      #drop-zone:active { background: var(--clr-yellow); }
+      #data-table tr:hover td { background: inherit; }
+      [data-theme="dark"] #data-table tr:hover td { background: inherit; }
       [data-theme="dark"] .sidebar-item:hover { background: inherit; color: inherit; }
+      [data-theme="dark"] .sidebar-item:active { background: #2a2500; color: var(--clr-yellow); }
       [data-theme="dark"] .sidebar-item.active { background: #000; color: var(--clr-yellow); }
+      [data-theme="dark"] #drop-zone:hover { background: var(--clr-surface); }
+      [data-theme="dark"] #drop-zone:active { background: #2a2500; }
+    }
+
+    /* ── RESPECT REDUCED MOTION ── */
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      #sidebar, #sidebar-backdrop, .toast, #modal-box, #palette-box, .tree-caret {
+        transition: none !important; animation: none !important;
+      }
     }
   </style>
 </head>
@@ -685,35 +983,41 @@
   <div id="tab-bar"></div>
   <div id="topbar-actions">
     <div id="view-toggle-group" role="group" aria-label="View mode">
-      <button class="btn active" id="btn-auto"  data-view="auto"  type="button">AUTO</button>
-      <button class="btn"        id="btn-chat"  data-view="chat"  type="button">CHAT</button>
-      <button class="btn"        id="btn-table" data-view="table" type="button">TABLE</button>
-      <button class="btn"        id="btn-tree"  data-view="tree"  type="button">TREE</button>
-      <button class="btn"        id="btn-stats" data-view="stats" type="button">STATS</button>
-      <button class="btn"        id="btn-raw"   data-view="raw"   type="button">RAW</button>
-      <button class="btn"        id="btn-diff"  data-view="diff"  type="button">DIFF</button>
+      <button class="btn active" id="btn-auto"  data-view="auto"  data-icon="✦"  type="button">AUTO</button>
+      <button class="btn"        id="btn-chat"  data-view="chat"  data-icon="✉"  type="button">CHAT</button>
+      <button class="btn"        id="btn-table" data-view="table" data-icon="▦"  type="button">TABLE</button>
+      <button class="btn"        id="btn-tree"  data-view="tree"  data-icon="▾"  type="button">TREE</button>
+      <button class="btn"        id="btn-stats" data-view="stats" data-icon="▤"  type="button">STATS</button>
+      <button class="btn"        id="btn-raw"   data-view="raw"   data-icon="{}" type="button">RAW</button>
+      <button class="btn"        id="btn-diff"  data-view="diff"  data-icon="⇄"  type="button">DIFF</button>
     </div>
     <span id="edit-indicator">EDITS: 0</span>
-    <button class="btn btn-purple" id="btn-download-mod" style="display:none;" type="button">↓ MODIFIED</button>
+    <button class="btn btn-purple" id="btn-download-mod" style="display:none;" data-icon="↓" type="button">↓ MODIFIED</button>
     <button class="btn btn-white"  id="btn-share"           type="button" title="Share via URL hash">🔗 SHARE</button>
-    <button class="btn btn-yellow" id="btn-load-new"        type="button">↑ LOAD</button>
+    <button class="btn btn-yellow" id="btn-load-new"        type="button" data-icon="↑" aria-label="Load JSON file">↑ LOAD</button>
+    <button class="btn btn-white"  id="btn-cmd"             type="button" aria-label="Open command menu">⌘</button>
     <button class="btn btn-white"  id="btn-theme-toggle"    type="button" aria-label="Toggle dark mode">🌙</button>
-    <button class="btn btn-white"  id="btn-sidebar-toggle"  type="button" aria-label="Toggle sidebar">☰</button>
+    <button class="btn btn-white"  id="btn-sidebar-toggle"  type="button" aria-label="Toggle sidebar" aria-expanded="false" aria-controls="sidebar">☰</button>
   </div>
 </header>
+
+<div id="sidebar-backdrop" hidden></div>
 
 <div id="app-shell">
   <aside id="sidebar" role="complementary" aria-label="Entry list">
     <div id="sidebar-header">
       <span id="sidebar-title">ENTRIES</span>
       <span id="sidebar-count" aria-live="polite"></span>
+      <button id="sidebar-close" type="button" aria-label="Close panel">✕</button>
     </div>
     <input type="search" id="sidebar-search" placeholder="Search entries…" aria-label="Search entries" autocomplete="off" />
     <div id="sidebar-list" role="list"></div>
     <div id="schema-panel">
-      <div style="font-weight:700; display:flex; justify-content:space-between; align-items:center;">
-        <span>SCHEMA INFERENCE</span>
-        <button class="btn btn-white" id="btn-copy-schema" style="padding:2px 6px; font-size:0.6rem;" type="button">COPY</button>
+      <div id="schema-head">
+        <button id="schema-toggle" type="button" aria-expanded="true" aria-controls="schema-tree">
+          <span id="schema-caret" aria-hidden="true">▼</span><span>SCHEMA INFERENCE</span>
+        </button>
+        <button class="btn btn-white" id="btn-copy-schema" style="padding:4px 8px; font-size:0.6rem;" type="button">COPY</button>
       </div>
       <div id="schema-tree"></div>
     </div>
@@ -758,7 +1062,7 @@
     <div id="content-area">
       <div id="breadcrumb-bar">
         <div id="breadcrumb-trail"><span class="crumb">root</span></div>
-        <button class="btn btn-white" id="btn-copy-path" style="padding:3px 8px; font-size:0.65rem;" type="button">📋 COPY PATH</button>
+        <button class="btn btn-white" id="btn-copy-path" type="button" data-icon="📋" aria-label="Copy JSONPath">📋 COPY PATH</button>
       </div>
 
       <!-- CHAT -->
@@ -776,9 +1080,9 @@
       <div id="table-view" role="region" aria-label="Table view">
         <div id="table-controls">
           <input type="search" id="table-search" placeholder="Filter rows…" aria-label="Filter rows" autocomplete="off" />
-          <button class="btn btn-white" id="btn-toggle-heatmap" type="button">🔥 HEATMAP: OFF</button>
+          <button class="btn btn-white" id="btn-toggle-heatmap" type="button" data-icon="🔥">🔥 HEATMAP: OFF</button>
           <div style="position:relative; display:inline-block;">
-            <button class="btn btn-black" id="btn-export-menu" type="button">↓ EXPORT ▼</button>
+            <button class="btn btn-black" id="btn-export-menu" type="button" data-icon="↓">↓ EXPORT ▼</button>
             <div id="export-dropdown" style="display:none; position:absolute; top:100%; right:0; background:var(--clr-surface); border:var(--border-thick); box-shadow:var(--shadow-md); z-index:20;">
               <button class="btn btn-white" id="export-csv" style="width:100%; border:none; border-bottom:1px solid #ccc;" type="button">CSV</button>
               <button class="btn btn-white" id="export-md"  style="width:100%; border:none; border-bottom:1px solid #ccc;" type="button">MARKDOWN</button>
@@ -788,12 +1092,18 @@
           </div>
           <span id="table-info" aria-live="polite"></span>
         </div>
+        <div id="table-mobile-bar">
+          <select id="table-sort" aria-label="Sort rows by column"></select>
+          <button class="btn btn-white" id="btn-sort-dir" type="button" aria-label="Toggle sort direction">↑ ASC</button>
+          <button class="btn btn-yellow" id="btn-table-layout" type="button" aria-label="Toggle card or grid layout">▦ GRID</button>
+        </div>
         <div id="table-wrapper">
           <table id="data-table" aria-label="Data table">
             <thead id="table-head"></thead>
             <tbody id="table-body"></tbody>
           </table>
         </div>
+        <div id="table-cards" role="list" aria-label="Data rows"></div>
         <div id="pagination" role="navigation" aria-label="Pagination">
           <button class="btn btn-white"  id="btn-prev" type="button">← PREV</button>
           <span   id="page-info"></span>
@@ -831,6 +1141,7 @@
         <div id="raw-toolbar">
           <button class="btn btn-yellow" id="btn-raw-pretty" type="button">PRETTY</button>
           <button class="btn btn-white"  id="btn-raw-mini"   type="button">MINIFY</button>
+          <button class="btn btn-white"  id="btn-raw-wrap"   type="button">↵ WRAP</button>
           <button class="btn btn-white"  id="btn-raw-copy"   type="button">📋 COPY</button>
         </div>
         <div id="raw-container">
@@ -861,6 +1172,7 @@
 <!-- VALUE MODAL -->
 <div id="modal-overlay" role="dialog" aria-modal="true" aria-label="Value detail">
   <div id="modal-box">
+    <div class="sheet-handle" aria-hidden="true"></div>
     <div id="modal-header">
       <span id="modal-title">VALUE</span>
       <button id="modal-close" type="button" aria-label="Close">✕</button>
@@ -872,9 +1184,10 @@
 <!-- COMMAND PALETTE -->
 <div id="palette-overlay" role="dialog" aria-modal="true" aria-label="Command palette">
   <div id="palette-box">
+    <div class="sheet-handle" aria-hidden="true"></div>
     <div id="palette-header">
-      <span>COMMAND PALETTE (CMD+K)</span>
-      <span style="font-size:0.65rem; opacity:0.7;">ESC TO DISMISS</span>
+      <span>COMMANDS</span>
+      <span style="font-size:0.65rem; opacity:0.7;">ESC / TAP OUT</span>
     </div>
     <input type="search" id="palette-search" placeholder="Type a command or view name..." autocomplete="off" />
     <div id="palette-list"></div>
@@ -882,6 +1195,7 @@
 </div>
 
 <button id="scroll-top" type="button" aria-label="Scroll to top">↑</button>
+<div id="toast-host" role="status" aria-live="polite"></div>
 
 <script>
 'use strict';
@@ -894,9 +1208,19 @@ const State = {
   activeConvIndex: 0, tableData: [], tableColumns: [], pinnedCols: [],
   tableSort: { col: null, dir: 'asc' }, tableFilter: '', heatmapOn: false,
   tablePage: 1, tablePageSize: 50, fileName: '', editCount: 0,
-  currentPath: ['root'], rawMode: 'pretty',
+  currentPath: ['root'], rawMode: 'pretty', rawWrap: true,
   diffDataA: null, diffDataB: null, diffNameA: '', diffNameB: '',
+  tableLayout: 'cards', drawerOpen: false, lastChart: null,
 };
+
+/* ── Environment probes (mobile shell behaves differently from desktop) ── */
+// Must mirror the mobile-shell media query in the stylesheet exactly.
+const MOBILE_MQ = window.matchMedia(
+  '(max-width: 768px), (max-height: 500px) and (orientation: landscape) and (pointer: coarse)'
+);
+const COARSE_MQ = window.matchMedia('(hover: none) and (pointer: coarse)');
+const isMobile = () => MOBILE_MQ.matches;
+const isTouch  = () => COARSE_MQ.matches;
 
 const $ = (id) => document.getElementById(id);
 const DOM = {
@@ -922,6 +1246,10 @@ const DOM = {
   modalTitle: $('modal-title'), modalBody: $('modal-body'),
   paletteOverlay: $('palette-overlay'), paletteSearch: $('palette-search'), paletteList: $('palette-list'),
   main: $('main'),
+  backdrop: $('sidebar-backdrop'), toastHost: $('toast-host'),
+  tableWrapper: $('table-wrapper'), tableCards: $('table-cards'),
+  tableSort: $('table-sort'), rawContainer: $('raw-container'),
+  schemaPanel: $('schema-panel'),
 };
 
 /* ── DOM Helpers ── */
@@ -949,11 +1277,62 @@ function el(tag, attrs, children) {
 }
 function txt(s) { return document.createTextNode(String(s ?? '')); }
 
+/* ── FEEDBACK: toasts + haptics (alert() is hostile on a phone) ── */
+function haptic(ms) {
+  if (!isTouch()) return;
+  try { navigator.vibrate?.(ms || 8); } catch {}
+}
+
+function toast(msg, kind) {
+  const t = el('div', { class: 'toast' + (kind === 'err' ? ' err' : '') }, [String(msg)]);
+  DOM.toastHost.appendChild(t);
+  // Keep at most three stacked so the tab bar never gets buried.
+  while (DOM.toastHost.children.length > 3) DOM.toastHost.firstChild.remove();
+  setTimeout(() => {
+    t.classList.add('out');
+    setTimeout(() => t.remove(), 200);
+  }, kind === 'err' ? 4200 : 2400);
+}
+
+/* Clipboard with a fallback: navigator.clipboard is unavailable on
+   insecure origins and on older mobile browsers. */
+function copyText(text, okMsg) {
+  const done = () => { toast('✓ ' + (okMsg || 'Copied')); haptic(); };
+  const fail = () => showError('Copy failed — clipboard unavailable.');
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => legacyCopy(text) ? done() : fail());
+  } else {
+    legacyCopy(text) ? done() : fail();
+  }
+}
+function legacyCopy(text) {
+  try {
+    const ta = el('textarea', { value: text, readOnly: true });
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select(); ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
 function showError(msg) {
+  haptic(30);
+  if (isMobile()) { toast('⚠ ' + msg, 'err'); return; }
   DOM.errorBar.style.display = 'block';
   DOM.errorBar.replaceChildren(txt('⚠ ' + msg));
   setTimeout(() => { DOM.errorBar.style.display = 'none'; }, 6000);
 }
+
+/* ── VIEWPORT: keep the shell pinned to the real visible height ──
+   iOS/Android collapse browser chrome while scrolling; 100vh overshoots
+   there, so dvh is used when available and JS keeps a fallback in sync. */
+function syncViewportHeight() {
+  if (CSS.supports?.('height: 100dvh')) return;
+  document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px');
+}
+syncViewportHeight();
 
 function formatDate(iso) {
   if (!iso) return '';
@@ -1021,9 +1400,10 @@ function closeTab(tabId, e) {
 
 function renderTabs() {
   DOM.tabBar.replaceChildren();
+  const maxLen = isMobile() ? 12 : 18;
   State.tabs.forEach(tab => {
     const item = el('div', { class: 'tab-item' + (tab.id === State.activeTabId ? ' active' : ''), tabindex: 0 }, [
-      txt(tab.fileName.length > 18 ? tab.fileName.slice(0, 15) + '…' : tab.fileName)
+      txt(tab.fileName.length > maxLen ? tab.fileName.slice(0, maxLen - 3) + '…' : tab.fileName)
     ]);
     const closeBtn = el('button', { class: 'tab-close', type: 'button', 'aria-label': 'Close tab' }, ['✕']);
     closeBtn.addEventListener('click', (e) => closeTab(tab.id, e));
@@ -1035,6 +1415,14 @@ function renderTabs() {
     });
     DOM.tabBar.appendChild(item);
   });
+  syncTabStrip();
+}
+
+/* On mobile the tab bar is a fixed strip below the topbar, so the shell has to
+   know its height. It only earns the space when more than one file is open. */
+function syncTabStrip() {
+  const h = (isMobile() && State.tabs.length > 1) ? '38px' : '0px';
+  document.documentElement.style.setProperty('--tabstrip-h', h);
 }
 
 function updateEditIndicator() {
@@ -1117,8 +1505,8 @@ function processData(data) {
   DOM.contentArea.style.overflow = 'hidden';
   DOM.statsBar.style.display  = 'flex';
 
-  // Auto-hide sidebar on mobile/tablet so content is visible
-  if (window.innerWidth <= 768) DOM.sidebar.classList.add('hidden');
+  // Content owns the whole screen on mobile; the drawer stays out of the way.
+  if (isMobile()) closeDrawer();
 
   renderStatsBar(data, type);
   renderSchemaInference(data);
@@ -1138,6 +1526,7 @@ function applyAutoView(type, data) {
 
 function activateView(view, data) {
   const d = data ?? State.modifiedData;
+  DOM.scrollTop.classList.remove('visible'); // each view has its own scroller
   DOM.chatView.style.display  = 'none';
   DOM.tableView.style.display = 'none';
   DOM.treeView.style.display  = 'none';
@@ -1175,6 +1564,9 @@ function activateView(view, data) {
     default:
       applyAutoView(State.jsonType, d);
   }
+
+  // The crumb trail is tree-specific; mobile hides it for the other views.
+  DOM.contentArea.classList.toggle('show-crumbs', DOM.treeView.style.display !== 'none');
 }
 
 function renderStatsBar(data, type) {
@@ -1208,7 +1600,9 @@ document.querySelectorAll('#view-toggle-group .btn').forEach((btn) => {
   btn.addEventListener('click', () => {
     State.currentView = btn.dataset.view;
     setToggleActive(btn.dataset.view);
+    haptic();
     if (State.modifiedData || btn.dataset.view === 'diff') activateView(btn.dataset.view, State.modifiedData);
+    else if (isMobile()) toast('Load a JSON file first');
   });
 });
 function setToggleActive(view) {
@@ -1217,7 +1611,91 @@ function setToggleActive(view) {
   );
 }
 
-$('btn-sidebar-toggle').addEventListener('click', () => DOM.sidebar.classList.toggle('hidden'));
+/* ── SIDEBAR: desktop column, mobile off-canvas drawer ── */
+function openDrawer() {
+  State.drawerOpen = true;
+  document.body.classList.add('drawer-open');
+  DOM.backdrop.hidden = false;
+  $('btn-sidebar-toggle').setAttribute('aria-expanded', 'true');
+  haptic(8);
+}
+function closeDrawer() {
+  if (!State.drawerOpen) return;
+  State.drawerOpen = false;
+  document.body.classList.remove('drawer-open');
+  $('btn-sidebar-toggle').setAttribute('aria-expanded', 'false');
+  // Keep it out of the tab order once it slides away.
+  setTimeout(() => { if (!State.drawerOpen) DOM.backdrop.hidden = true; }, 260);
+}
+function toggleSidebar() {
+  if (isMobile()) { State.drawerOpen ? closeDrawer() : openDrawer(); return; }
+  DOM.sidebar.classList.toggle('hidden');
+}
+
+$('btn-sidebar-toggle').addEventListener('click', toggleSidebar);
+$('sidebar-close').addEventListener('click', closeDrawer);
+DOM.backdrop.addEventListener('click', closeDrawer);
+
+/* Swipe the drawer closed, and swipe it open from the left screen edge. */
+(function initDrawerGestures() {
+  let startX = 0, startY = 0, dx = 0, tracking = false, fromEdge = false;
+
+  const onStart = (e) => {
+    if (!isMobile() || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    startX = t.clientX; startY = t.clientY; dx = 0;
+    fromEdge = !State.drawerOpen && startX <= 22;
+    tracking = State.drawerOpen ? DOM.sidebar.contains(e.target) : fromEdge;
+  };
+
+  const onMove = (e) => {
+    if (!tracking) return;
+    const t = e.touches[0];
+    dx = t.clientX - startX;
+    // Abandon if the gesture is really a vertical scroll.
+    if (Math.abs(t.clientY - startY) > Math.abs(dx) && Math.abs(t.clientY - startY) > 12) {
+      tracking = false; DOM.sidebar.classList.remove('dragging'); DOM.sidebar.style.transform = '';
+      return;
+    }
+    const w = DOM.sidebar.offsetWidth || 300;
+    DOM.sidebar.classList.add('dragging');
+    if (State.drawerOpen && dx < 0) {
+      DOM.sidebar.style.transform = 'translateX(' + Math.max(dx, -w) + 'px)';
+      e.preventDefault();
+    } else if (fromEdge && dx > 0) {
+      if (!document.body.classList.contains('drawer-open')) openDrawer();
+      DOM.sidebar.style.transform = 'translateX(' + Math.min(dx - w, 0) + 'px)';
+      e.preventDefault();
+    }
+  };
+
+  const onEnd = () => {
+    if (!tracking) return;
+    tracking = false;
+    const w = DOM.sidebar.offsetWidth || 300;
+    DOM.sidebar.classList.remove('dragging');
+    DOM.sidebar.style.transform = '';
+    if (fromEdge) { if (dx < w * 0.4) closeDrawer(); }
+    else if (dx < -w * 0.3) closeDrawer();
+    fromEdge = false;
+  };
+
+  document.addEventListener('touchstart', onStart, { passive: true });
+  document.addEventListener('touchmove',  onMove,  { passive: false });
+  document.addEventListener('touchend',   onEnd,   { passive: true });
+  document.addEventListener('touchcancel', onEnd,  { passive: true });
+})();
+
+/* Schema inference collapses so the entry list keeps the drawer's height. */
+(function initSchemaPanel() {
+  const toggle = $('schema-toggle');
+  const setState = (collapsed) => {
+    DOM.schemaPanel.classList.toggle('collapsed', collapsed);
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+  };
+  setState(isMobile());
+  toggle.addEventListener('click', () => setState(!DOM.schemaPanel.classList.contains('collapsed')));
+})();
 
 /* ── SIDEBAR RESIZER ── */
 (function initResizer() {
@@ -1277,8 +1755,7 @@ function buildSchemaNode(key, schema) {
 
 $('btn-copy-schema').addEventListener('click', () => {
   const schema = inferSchema(State.modifiedData);
-  navigator.clipboard.writeText(JSON.stringify(schema, null, 2));
-  alert('Schema copied to clipboard!');
+  copyText(JSON.stringify(schema, null, 2), 'Schema copied');
 });
 
 /* ── BREADCRUMB & PATH COPY ── */
@@ -1300,8 +1777,7 @@ function updateBreadcrumb(pathArr) {
 
 $('btn-copy-path').addEventListener('click', () => {
   const pathStr = '$.' + State.currentPath.slice(1).join('.');
-  navigator.clipboard.writeText(pathStr);
-  alert('JSONPath copied: ' + pathStr);
+  copyText(pathStr, 'Path copied: ' + pathStr);
 });
 
 /* ── CHAT VIEW ── */
@@ -1334,8 +1810,8 @@ function renderChatSidebar(data) {
         DOM.sidebarList.querySelectorAll('.sidebar-item').forEach((s) => s.classList.remove('active'));
         item.classList.add('active');
         renderChatConversation(conv);
-        // Auto-close sidebar on mobile/tablet
-        if (window.innerWidth <= 768) DOM.sidebar.classList.add('hidden');
+        // Picking a conversation is the drawer's job — dismiss it afterwards.
+        if (isMobile()) closeDrawer();
       };
       item.addEventListener('click', activate);
       item.addEventListener('keydown', (e) => { if (e.key === 'Enter') activate(); });
@@ -1556,11 +2032,107 @@ function renderTable() {
     });
   }
 
+  if (cardsActive()) renderTableCards(slice, sortedCols, colMinMax, (page - 1) * ps);
+  syncSortControls();
+  applyTableLayout();
+
   DOM.tableInfo.replaceChildren(txt(total + ' rows · page ' + page + '/' + pages));
   DOM.pageInfo.replaceChildren(txt('PAGE ' + page + ' / ' + pages));
   $('btn-prev').disabled = page <= 1;
   $('btn-next').disabled = page >= pages;
 }
+
+/* ── MOBILE TABLE: stacked cards ──
+   A 20-column grid is unreadable on a phone even with horizontal scroll, so
+   each row becomes a self-contained card. GRID mode stays one tap away. */
+// Cards win on a narrow portrait screen; in landscape there is width for real
+// columns but almost no height, so the grid shows far more data per pixel.
+function cardsActive() { return isMobile() && window.innerWidth < 700 && State.tableLayout === 'cards'; }
+
+function applyTableLayout() {
+  const cards = cardsActive();
+  DOM.tableWrapper.style.display = cards ? 'none' : '';
+  DOM.tableCards.style.display   = cards ? 'flex' : 'none';
+  $('btn-table-layout').textContent = cards ? '▦ GRID' : '▤ CARDS';
+}
+
+function renderTableCards(rows, cols, colMinMax, offset) {
+  DOM.tableCards.replaceChildren();
+  if (!rows.length) {
+    DOM.tableCards.appendChild(el('div', { id: 'table-cards-empty' }, ['No results.']));
+    return;
+  }
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const titleKey = ['name', 'title', 'id', 'label', 'key'].find((k) => cols.includes(k));
+
+  rows.forEach((row, i) => {
+    const num  = offset + i + 1;
+    const card = el('div', { class: 'row-card', role: 'listitem' });
+    let title = '';
+    if (row && typeof row === 'object' && titleKey && row[titleKey] != null && typeof row[titleKey] !== 'object') {
+      title = String(row[titleKey]);
+      if (title.length > 30) title = title.slice(0, 29) + '…';
+    }
+    card.appendChild(el('div', { class: 'row-card-head' }, [
+      el('span', {}, [title || 'ROW ' + num]),
+      el('span', {}, ['#' + num]),
+    ]));
+
+    const body = el('div', { class: 'row-card-body' });
+    if (row === null || typeof row !== 'object') {
+      const val = el('div', { class: 'rc-val' });
+      renderCell(row, val, 'value');
+      body.appendChild(el('div', { class: 'rc-field' }, [el('div', { class: 'rc-key' }, ['VALUE']), val]));
+    } else {
+      cols.forEach((col) => {
+        if (!(col in row)) return; // omit keys this row does not have — keeps cards short
+        const val = row[col];
+        const valEl = el('div', { class: 'rc-val' });
+        const mm = colMinMax[col];
+        if (State.heatmapOn && typeof val === 'number' && mm && mm.max > mm.min) {
+          const ratio = (val - mm.min) / (mm.max - mm.min);
+          valEl.style.backgroundColor = `hsl(${240 - ratio * 240}, 80%, ${dark ? '25%' : '88%'})`;
+        }
+        renderCell(val, valEl, col);
+        body.appendChild(el('div', { class: 'rc-field' }, [el('div', { class: 'rc-key' }, [col]), valEl]));
+      });
+    }
+    card.appendChild(body);
+    DOM.tableCards.appendChild(card);
+  });
+}
+
+/* Column headers are the desktop sort control; phones get a select instead. */
+function syncSortControls() {
+  const sel = DOM.tableSort;
+  const wanted = ['', ...State.tableColumns].join('|');
+  if (sel.dataset.cols !== wanted) {
+    sel.dataset.cols = wanted;
+    sel.replaceChildren();
+    sel.appendChild(el('option', { value: '' }, ['SORT: NONE']));
+    State.tableColumns.forEach((c) => sel.appendChild(el('option', { value: c }, ['SORT: ' + c])));
+  }
+  sel.value = State.tableSort.col ?? '';
+  $('btn-sort-dir').textContent = State.tableSort.dir === 'asc' ? '↑ ASC' : '↓ DESC';
+  $('btn-sort-dir').disabled = !State.tableSort.col;
+}
+
+DOM.tableSort.addEventListener('change', (e) => {
+  State.tableSort.col = e.target.value || null;
+  State.tablePage = 1;
+  renderTable();
+});
+$('btn-sort-dir').addEventListener('click', () => {
+  State.tableSort.dir = State.tableSort.dir === 'asc' ? 'desc' : 'asc';
+  State.tablePage = 1;
+  renderTable();
+  haptic();
+});
+$('btn-table-layout').addEventListener('click', () => {
+  State.tableLayout = State.tableLayout === 'cards' ? 'grid' : 'cards';
+  renderTable();
+  haptic();
+});
 
 function renderCell(val, td, colKey) {
   if (val === null || val === undefined) { td.className += ' td-null'; td.appendChild(txt('null')); return; }
@@ -1586,6 +2158,10 @@ $('btn-next').addEventListener('click', () => { State.tablePage++; renderTable()
 $('btn-toggle-heatmap').addEventListener('click', () => {
   State.heatmapOn = !State.heatmapOn;
   $('btn-toggle-heatmap').textContent = '🔥 HEATMAP: ' + (State.heatmapOn ? 'ON' : 'OFF');
+  // The label is hidden on mobile, so the on-state also reads as a filled button.
+  $('btn-toggle-heatmap').classList.toggle('btn-yellow', State.heatmapOn);
+  $('btn-toggle-heatmap').classList.toggle('btn-white', !State.heatmapOn);
+  haptic();
   renderTable();
 });
 
@@ -1697,16 +2273,38 @@ function buildTreeNode(key, value, depth, open, pathArr) {
   if (typeof value === 'number')  { cls = 'tree-val-num';  display = String(value); }
   if (typeof value === 'boolean') { cls = 'tree-val-bool'; display = String(value); }
 
-  const valEl = el('span', { class: cls, title: 'Double-click or press Enter to edit', tabindex: 0 }, [display]);
+  const touch = isTouch();
+  const valEl = el('span', {
+    class: cls, tabindex: 0,
+    title: touch ? 'Tap to edit' : 'Double-click or press Enter to edit',
+  }, [display]);
   valEl.style.cursor = 'pointer';
 
   const triggerEdit = (e) => {
     e.stopPropagation();
-    const input = el('input', { class: 'tree-edit-input', value: typeof value === 'string' ? value : String(value) });
+    const input = el('input', {
+      class: 'tree-edit-input',
+      value: typeof value === 'string' ? value : String(value),
+      // Give phone keyboards the right layout for the value being edited.
+      inputMode: typeof value === 'number' ? 'decimal' : 'text',
+      autocapitalize: 'off', autocomplete: 'off', spellcheck: false,
+    });
     row.replaceChild(input, valEl);
     input.focus();
+    if (isTouch()) input.select();
+
+    // Enter/Escape and blur can all fire for one edit (dismissing the phone
+    // keyboard blurs the field), so the edit settles exactly once.
+    let settled = false;
+    const rerender = () => {
+      const scroll = DOM.treeContainer.scrollTop;
+      renderTree(State.modifiedData);
+      DOM.treeContainer.scrollTop = scroll;
+    };
 
     const saveEdit = () => {
+      if (settled) return;
+      settled = true;
       let newVal = input.value;
       if (typeof value === 'number') newVal = Number(newVal);
       else if (typeof value === 'boolean') newVal = newVal === 'true';
@@ -1718,14 +2316,24 @@ function buildTreeNode(key, value, depth, open, pathArr) {
 
       State.editCount++;
       updateEditIndicator();
-      renderTree(State.modifiedData);
+      rerender();
+    };
+    const cancelEdit = () => {
+      if (settled) return;
+      settled = true;
+      rerender();
     };
 
-    input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') saveEdit(); else if (ev.key === 'Escape') renderTree(State.modifiedData); });
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); saveEdit(); }
+      else if (ev.key === 'Escape') cancelEdit();
+    });
     input.addEventListener('blur', saveEdit);
   };
 
-  valEl.addEventListener('dblclick', triggerEdit);
+  // dblclick is unreliable on touch screens — a single tap edits there instead.
+  if (touch) valEl.addEventListener('click', triggerEdit);
+  else valEl.addEventListener('dblclick', triggerEdit);
   valEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') triggerEdit(e); });
 
   row.appendChild(keyEl); row.appendChild(valEl); node.appendChild(row);
@@ -1786,11 +2394,16 @@ function renderStatsDashboard(data) {
     }
   });
 
-  // Render Charts via Canvas
-  setTimeout(() => {
-    drawBarChart('chart-types', Object.keys(colTypes).slice(0, 10), Object.values(colTypes).map(t => t.string || 0), '#00c27a');
-    drawBarChart('chart-nulls', Object.keys(colNulls).slice(0, 10), Object.values(colNulls).slice(0, 10), '#ff3b3b');
-  }, 100);
+  // Fewer bars on a narrow screen — 10 labels in 340px is unreadable.
+  const limit = window.innerWidth < 420 ? 5 : isMobile() ? 7 : 10;
+  const typeEntries = Object.entries(colTypes).slice(0, limit);
+  const nullEntries = Object.entries(colNulls).slice(0, limit);
+  State.charts = [
+    ['chart-types', typeEntries.map(([k]) => k), typeEntries.map(([, t]) => t.string || 0), '#00c27a'],
+    ['chart-nulls', nullEntries.map(([k]) => k), nullEntries.map(([, v]) => v),            '#ff3b3b'],
+  ];
+  // Draw after layout so clientWidth is real (canvas is inside a hidden view until now).
+  requestAnimationFrame(() => requestAnimationFrame(redrawCharts));
 
   // Numeric Stats Cards
   const numGrid = $('stats-numeric-grid');
@@ -1809,26 +2422,72 @@ function renderStatsDashboard(data) {
   });
 }
 
+function redrawCharts() {
+  (State.charts || []).forEach((c) => drawBarChart(c[0], c[1], c[2], c[3]));
+}
+
 function drawBarChart(canvasId, labels, values, color) {
   const canvas = $(canvasId);
   if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  canvas.width = canvas.clientWidth;
-  canvas.height = canvas.clientHeight;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
 
-  if (values.length === 0) return;
-  const maxVal = Math.max(...values, 1);
-  const barW = (canvas.width - 40) / values.length;
+  // Back the canvas with real device pixels — otherwise bars and labels are
+  // soft on every phone (2x/3x displays).
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width  = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!values.length) return;
+
+  const dark    = document.documentElement.getAttribute('data-theme') === 'dark';
+  const ink     = dark ? '#f0ebe0' : '#0a0a0a';
+  const padL    = 26, padB = 26, padT = 14;
+  const plotW   = Math.max(w - padL - 6, 10);
+  const plotH   = Math.max(h - padB - padT, 10);
+  const maxVal  = Math.max(...values, 1);
+  const barW    = plotW / values.length;
+  const barGap  = Math.min(6, barW * 0.25);
+  const rotate  = barW < 38;
+
+  ctx.font = '10px ' + (rotate ? 'monospace' : 'monospace');
+  ctx.textBaseline = 'alphabetic';
 
   values.forEach((v, i) => {
-    const barH = (v / maxVal) * (canvas.height - 40);
+    const barH = (v / maxVal) * plotH;
+    const x = padL + i * barW;
     ctx.fillStyle = color;
-    ctx.fillRect(30 + i * barW, canvas.height - 20 - barH, barW - 6, barH);
-    ctx.fillStyle = document.documentElement.getAttribute('data-theme')==='dark'?'#fff':'#000';
-    ctx.font = '10px monospace';
-    ctx.fillText(labels[i]?.slice(0, 6) || '', 30 + i * barW, canvas.height - 5);
+    ctx.fillRect(x, padT + plotH - barH, Math.max(barW - barGap, 2), barH);
+
+    // Value on top of the bar
+    ctx.fillStyle = ink;
+    ctx.textAlign = 'center';
+    if (v) ctx.fillText(String(v), x + (barW - barGap) / 2, padT + plotH - barH - 3);
+
+    // Axis label — rotated when the bars get thin so nothing overlaps
+    const label = String(labels[i] ?? '');
+    if (rotate) {
+      ctx.save();
+      ctx.translate(x + (barW - barGap) / 2, h - 4);
+      ctx.rotate(-Math.PI / 4);
+      ctx.textAlign = 'right';
+      ctx.fillText(label.length > 9 ? label.slice(0, 8) + '…' : label, 0, 0);
+      ctx.restore();
+    } else {
+      ctx.fillText(label.length > 9 ? label.slice(0, 8) + '…' : label, x + (barW - barGap) / 2, h - 6);
+    }
   });
+
+  // Baseline
+  ctx.strokeStyle = ink;
+  ctx.globalAlpha = 0.35;
+  ctx.beginPath();
+  ctx.moveTo(padL - 4, padT + plotH + 0.5);
+  ctx.lineTo(w - 4, padT + plotH + 0.5);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
 }
 
 /* ── RAW VIEW ── */
@@ -1836,17 +2495,20 @@ function renderRawView(data) {
   const text = State.rawMode === 'pretty' ? JSON.stringify(data, null, 2) : JSON.stringify(data);
   const lines = text.split('\n');
 
+  // Line numbers stop lining up once lines wrap, so they hide in wrap mode.
+  DOM.rawContainer.classList.toggle('wrap', State.rawWrap);
+  $('raw-line-numbers').style.display = State.rawWrap ? 'none' : '';
   $('raw-line-numbers').replaceChildren();
-  lines.forEach((_, i) => $('raw-line-numbers').appendChild(el('div', {}, [String(i + 1)])));
+  if (!State.rawWrap) lines.forEach((_, i) => $('raw-line-numbers').appendChild(el('div', {}, [String(i + 1)])));
   $('raw-code').replaceChildren(txt(text));
+  $('btn-raw-wrap').classList.toggle('btn-yellow', State.rawWrap);
+  $('btn-raw-wrap').classList.toggle('btn-white', !State.rawWrap);
 }
 
 $('btn-raw-pretty').addEventListener('click', () => { State.rawMode = 'pretty'; renderRawView(State.modifiedData); });
 $('btn-raw-mini').addEventListener('click',   () => { State.rawMode = 'mini';   renderRawView(State.modifiedData); });
-$('btn-raw-copy').addEventListener('click',   () => {
-  navigator.clipboard.writeText(JSON.stringify(State.modifiedData, null, 2));
-  alert('Raw JSON copied!');
-});
+$('btn-raw-wrap').addEventListener('click',   () => { State.rawWrap = !State.rawWrap; renderRawView(State.modifiedData); haptic(); });
+$('btn-raw-copy').addEventListener('click',   () => copyText(JSON.stringify(State.modifiedData, null, 2), 'Raw JSON copied'));
 
 /* ── DIFF VIEW ── */
 function renderDiffView() {
@@ -1873,6 +2535,51 @@ function renderDiffView() {
   $('diff-summary').textContent = `DIFF SUMMARY: +${add} additions, -${del} deletions`;
 }
 
+/* Drag-and-drop does not exist on a touch screen, so each diff slot is also
+   a tap target that opens the system file picker. */
+(function initDiffSlots() {
+  const input = el('input', { type: 'file', accept: '.json,application/json' });
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  let slot = 'a';
+
+  const accept = (file, which) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      let data;
+      try { data = JSON.parse(ev.target.result); }
+      catch (err) { showError('Invalid JSON in ' + file.name + ': ' + err.message); return; }
+      if (which === 'a') { State.diffDataA = data; State.diffNameA = file.name; $('diff-name-a').textContent = file.name; }
+      else               { State.diffDataB = data; State.diffNameB = file.name; $('diff-name-b').textContent = file.name; }
+      if (State.diffDataA && State.diffDataB) { renderDiffView(); haptic(); }
+      else toast('Now add file ' + (which === 'a' ? 'B' : 'A'));
+    };
+    reader.readAsText(file);
+  };
+
+  input.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) accept(file, slot);
+  });
+
+  ['a', 'b'].forEach((which) => {
+    const box = $('diff-box-' + which);
+    box.setAttribute('role', 'button');
+    box.tabIndex = 0;
+    const pick = () => { slot = which; input.value = ''; input.click(); };
+    box.addEventListener('click', pick);
+    box.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    box.addEventListener('dragover', (e) => { e.preventDefault(); box.classList.add('drag-over'); });
+    box.addEventListener('dragleave', () => box.classList.remove('drag-over'));
+    box.addEventListener('drop', (e) => {
+      e.preventDefault();
+      box.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) accept(file, which);
+    });
+  });
+})();
+
 function loadDiffPair(fileA, fileB) {
   const rA = new FileReader(), rB = new FileReader();
   rA.onload = (eA) => {
@@ -1893,16 +2600,24 @@ function loadDiffPair(fileA, fileB) {
 }
 
 /* ── SHARE SNAPSHOT (URL HASH) ── */
-$('btn-share').addEventListener('click', () => {
+function shareSnapshot() {
+  if (!State.modifiedData) { showError('Load some JSON first.'); return; }
   try {
     const str = JSON.stringify(State.modifiedData);
     if (str.length > 15000) { showError('JSON too large to encode in URL snapshot.'); return; }
-    const hash = '#snapshot=' + btoa(encodeURIComponent(str));
-    window.location.hash = hash;
-    navigator.clipboard.writeText(window.location.href);
-    alert('Shareable URL snapshot copied to clipboard!');
+    window.location.hash = '#snapshot=' + btoa(encodeURIComponent(str));
+    const url = window.location.href;
+    // Phones get the real OS share sheet; desktop falls back to the clipboard.
+    if (navigator.share && isTouch()) {
+      navigator.share({ title: 'JSONBRUT snapshot', text: State.fileName, url })
+        .then(() => haptic())
+        .catch((err) => { if (err && err.name !== 'AbortError') copyText(url, 'Snapshot URL copied'); });
+      return;
+    }
+    copyText(url, 'Snapshot URL copied');
   } catch { showError('Failed to create snapshot.'); }
-});
+}
+$('btn-share').addEventListener('click', shareSnapshot);
 
 (function checkSnapshotHash() {
   if (window.location.hash.startsWith('#snapshot=')) {
@@ -1924,11 +2639,31 @@ const Palette = {
     { title: 'Switch View: RAW',   action: () => { State.currentView='raw'; setToggleActive('raw'); activateView('raw'); } },
     { title: 'Switch View: DIFF',  action: () => { State.currentView='diff'; setToggleActive('diff'); activateView('diff'); } },
     { title: 'Toggle Theme (Dark/Light)', action: () => $('btn-theme-toggle').click() },
+    { title: 'Open Entries / Schema Panel', action: () => (isMobile() ? openDrawer() : DOM.sidebar.classList.remove('hidden')) },
+    { title: 'Load Another File',  action: () => $('btn-load-new').click() },
+    { title: 'Share Snapshot Link',action: () => shareSnapshot() },
+    { title: 'Copy Raw JSON',      action: () => copyText(JSON.stringify(State.modifiedData, null, 2), 'Raw JSON copied') },
+    { title: 'Copy Inferred Schema', action: () => $('btn-copy-schema').click() },
+    { title: 'Download Modified JSON', action: () => $('btn-download-mod').click() },
+    { title: 'Toggle Table Cards / Grid', action: () => $('btn-table-layout').click() },
+    { title: 'Toggle Numeric Heatmap', action: () => $('btn-toggle-heatmap').click() },
     { title: 'Export to CSV',      action: () => $('export-csv').click() },
+    { title: 'Export to Markdown', action: () => $('export-md').click() },
+    { title: 'Export to YAML',     action: () => $('export-yaml').click() },
+    { title: 'Export to XML',      action: () => $('export-xml').click() },
     { title: 'Expand All (Tree)',  action: () => $('btn-expand-all').click() },
     { title: 'Collapse All (Tree)',action: () => $('btn-collapse-all').click() },
   ],
-  open() { DOM.paletteOverlay.classList.add('open'); DOM.paletteSearch.value = ''; DOM.paletteSearch.focus(); Palette.render(''); },
+  open() {
+    closeDrawer();
+    DOM.paletteOverlay.classList.add('open');
+    DOM.paletteSearch.value = '';
+    Palette.render('');
+    // Auto-focusing on a phone throws the keyboard over the list; let the
+    // user tap the field if they want to filter.
+    if (!isTouch()) DOM.paletteSearch.focus();
+    haptic();
+  },
   close() { DOM.paletteOverlay.classList.remove('open'); },
   render(query) {
     DOM.paletteList.replaceChildren();
@@ -1942,10 +2677,15 @@ const Palette = {
 };
 
 DOM.paletteSearch.addEventListener('input', (e) => Palette.render(e.target.value));
+$('btn-cmd').addEventListener('click', () => Palette.open());
+
+/* Tapping the dimmed area dismisses a sheet — the expected mobile gesture. */
+DOM.paletteOverlay.addEventListener('click', (e) => { if (e.target === DOM.paletteOverlay) Palette.close(); });
+DOM.modalOverlay.addEventListener('click',   (e) => { if (e.target === DOM.modalOverlay) DOM.modalOverlay.classList.remove('open'); });
 
 document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); Palette.open(); return; }
-  if (e.key === 'Escape') { Palette.close(); DOM.modalOverlay.classList.remove('open'); return; }
+  if (e.key === 'Escape') { Palette.close(); DOM.modalOverlay.classList.remove('open'); closeDrawer(); return; }
   if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
   if (e.key === '1') { State.currentView='auto'; setToggleActive('auto'); activateView('auto'); }
   if (e.key === '2') { State.currentView='chat'; setToggleActive('chat'); activateView('chat'); }
@@ -1967,9 +2707,22 @@ function openModal(key, value) {
 }
 $('modal-close').addEventListener('click', () => DOM.modalOverlay.classList.remove('open'));
 
-/* ── SCROLL TOP ── */
-DOM.main.addEventListener('scroll', (e) => DOM.scrollTop.classList.toggle('visible', e.target.scrollTop > 300));
-DOM.scrollTop.addEventListener('click', () => { DOM.main.scrollTop = 0; });
+/* ── SCROLL TOP ──
+   Each view scrolls its own container, so the button follows whichever
+   one the finger last moved. */
+const SCROLLERS = [
+  DOM.main, DOM.messagesList, DOM.tableWrapper, DOM.tableCards,
+  DOM.treeContainer, DOM.statsView, DOM.rawContainer, DOM.diffView,
+].filter(Boolean);
+let activeScroller = DOM.main;
+SCROLLERS.forEach((s) => s.addEventListener('scroll', () => {
+  activeScroller = s;
+  DOM.scrollTop.classList.toggle('visible', s.scrollTop > 300);
+}, { passive: true }));
+DOM.scrollTop.addEventListener('click', () => {
+  (activeScroller || DOM.main).scrollTo({ top: 0, behavior: 'smooth' });
+  haptic();
+});
 
 /* ── THEME ── */
 (function initTheme() {
@@ -1978,14 +2731,77 @@ DOM.scrollTop.addEventListener('click', () => { DOM.main.scrollTop = 0; });
 })();
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
+  document.documentElement.style.colorScheme = theme;
   const btn = $('btn-theme-toggle');
   if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
   localStorage.setItem('jsonbrut-theme', theme);
+  // Paint the browser/status bar to match the app chrome.
+  const meta = $('meta-theme-color');
+  if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#0a0a0a');
+  redrawCharts();
 }
 $('btn-theme-toggle').addEventListener('click', () => {
   const current = document.documentElement.getAttribute('data-theme') || 'dark';
   applyTheme(current === 'dark' ? 'light' : 'dark');
+  haptic();
 });
+
+/* ── VIEWPORT / ORIENTATION ──
+   Rotating a phone changes which shell applies, how many chart bars fit and
+   whether the table should be cards, so everything size-dependent re-syncs. */
+function onViewportChange() {
+  syncViewportHeight();
+  syncTabStrip();
+  if (!isMobile()) closeDrawer();
+  // Rotating can flip cards ↔ grid, so the table is rebuilt, not just re-shown.
+  if (State.tableData.length && DOM.tableView.style.display !== 'none') renderTable();
+  else applyTableLayout();
+  redrawCharts();
+}
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(onViewportChange, 120);
+});
+window.addEventListener('orientationchange', () => setTimeout(onViewportChange, 260));
+
+const onBreakpointChange = () => {
+  onViewportChange();
+  renderTabs();
+  if (State.tableData.length && DOM.tableView.style.display !== 'none') renderTable();
+};
+if (MOBILE_MQ.addEventListener) MOBILE_MQ.addEventListener('change', onBreakpointChange);
+else if (MOBILE_MQ.addListener) MOBILE_MQ.addListener(onBreakpointChange);
+
+/* ── INSTALLABLE (Add to Home Screen) ──
+   A generated manifest keeps the single-file promise while letting the app
+   launch standalone, without browser chrome. */
+(function installManifest() {
+  try {
+    const icon = document.querySelector('link[rel="icon"]')?.href;
+    const manifest = {
+      name: 'JSONBRUT — JSON Power Suite',
+      short_name: 'JSONBRUT',
+      description: 'Brutalist JSON visualizer, diff engine and stats dashboard.',
+      start_url: location.pathname + location.search,
+      scope: location.pathname.replace(/[^/]*$/, ''),
+      display: 'standalone',
+      orientation: 'any',
+      background_color: '#141414',
+      theme_color: '#000000',
+      icons: icon ? [{ src: icon, sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }] : [],
+    };
+    const url  = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' }));
+    const link = document.createElement('link');
+    link.rel = 'manifest'; link.href = url;
+    document.head.appendChild(link);
+  } catch {}
+})();
+
+/* ── STARTUP ── */
+State.rawWrap = isMobile();
+syncTabStrip();
+applyTableLayout();
 </script>
 </body>
 </html>

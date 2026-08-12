@@ -19,6 +19,28 @@
 - **Multi-Format Export** — Export arrays to CSV, Markdown, YAML, or XML.
 - **URL & Snapshot Sharing** — Load via API URL or share lightweight JSON via URL hash snapshots.
 - **Privacy First** — 100% client-side parsing. Your data never leaves your browser.
+- **Mobile-Native Shell** — Bottom tab bar, off-canvas drawer, bottom sheets, and card-based tables on phones.
+
+---
+
+## On Mobile
+
+Phones get a different shell, not a shrunken desktop one:
+
+| Desktop | Phone |
+|---|---|
+| View toggles in the topbar | Fixed **bottom tab bar** with all 7 views |
+| Sidebar column | **Off-canvas drawer** — tap `☰`, swipe from the left edge, or swipe it away |
+| Wide data grid | **Card layout** per row, with a sort picker (`▤ CARDS` / `▦ GRID` to switch) |
+| `Cmd+K` command palette | `⌘` button opens the same commands as a **bottom sheet** |
+| `alert()` confirmations | Non-blocking **toasts** + haptic feedback |
+| Drag & drop two files to diff | **Tap either diff slot** to pick a file |
+| Copy link to clipboard | Native **share sheet** via the Web Share API |
+
+Also handled: notch and home-indicator safe areas, `100dvh` so the collapsing
+browser bar never crops the layout, 16px inputs so iOS never zooms on focus,
+tap-to-edit values in the tree, retina-sharp charts, landscape re-layout, and
+`Add to Home Screen` for a standalone, chrome-free launch.
 
 ---
 
@@ -44,7 +66,7 @@ start jsonbrut/index.html       # Windows
 | `1` - `4` | Quick-switch views (Auto, Chat, Table, Tree) |
 | `d` | Toggle Dark / Light mode |
 | `Esc` | Close active modal or Command Palette |
-| `Double-Click` | Edit primitive value inline in Tree view |
+| `Double-Click` | Edit primitive value inline in Tree view (single **tap** on touch devices) |
 
 ---
 
