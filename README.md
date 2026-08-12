@@ -11,6 +11,7 @@
 ## Features
 
 - **Auto View Detection** — Auto-renders Chat (Claude/ChatGPT exports), Table (CSV-like arrays), Tree, or Stats based on JSON structure.
+- **Chat Transcript Tools** — In-conversation search with match stepping, conversation switcher, and long messages collapsed by default.
 - **7 View Modes** — `AUTO`, `CHAT`, `TABLE`, `TREE`, `STATS`, `RAW`, and `DIFF`.
 - **Recursive JSON Diff View** — Compare two JSON files side-by-side with additions/deletions highlighting.
 - **Inline Editing** — Double-click primitive values in Tree view to modify and export updated JSON.
@@ -36,11 +37,39 @@ Phones get a different shell, not a shrunken desktop one:
 | `alert()` confirmations | Non-blocking **toasts** + haptic feedback |
 | Drag & drop two files to diff | **Tap either diff slot** to pick a file |
 | Copy link to clipboard | Native **share sheet** via the Web Share API |
+| `PREV` / `NEXT` paging | **Infinite scroll** with a `LOAD MORE` fallback |
+
+### Gestures
+
+| Gesture | Does |
+|---|---|
+| Swipe content left / right | Previous / next view |
+| Swipe in from the left edge | Open entries, conversations, schema |
+| Swipe the panel away | Close it (or tap outside) |
+| Tap a value in `TREE` | Edit it inline |
+
+They are introduced once on first run and stay documented under
+**Gestures & Shortcuts** in the `⌘` command menu.
 
 Also handled: notch and home-indicator safe areas, `100dvh` so the collapsing
 browser bar never crops the layout, 16px inputs so iOS never zooms on focus,
-tap-to-edit values in the tree, retina-sharp charts, landscape re-layout, and
-`Add to Home Screen` for a standalone, chrome-free launch.
+retina-sharp charts, landscape re-layout, and `Add to Home Screen` for a
+standalone, chrome-free launch.
+
+---
+
+## Large Files
+
+Every render path is bounded, so a multi-MB export does not lock the browser:
+
+- Table rows, raw lines, diff lines and chat messages all render in chunks and
+  extend as you scroll.
+- Schema inference samples arrays instead of walking every item.
+- `EXPAND ALL` is capped per tap; filters and searches are debounced.
+- Only the visible table representation is built — cards or grid, never both.
+
+Measured on an iPhone 13 viewport with an **11.1 MB / 60k-row** file: load plus
+first paint **214 ms**, ~1.7k DOM nodes on screen.
 
 ---
 
