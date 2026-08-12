@@ -589,6 +589,41 @@
     }
     .palette-item:hover, .palette-item.selected { background: var(--clr-yellow); color: #000; font-weight: 700; }
 
+    /* ── SWIPE FEEDBACK, HELP SHEET, FIRST-RUN COACH ── */
+    @keyframes view-in-next { from { transform: translateX(12%); opacity: 0.35; } to { transform: none; opacity: 1; } }
+    @keyframes view-in-prev { from { transform: translateX(-12%); opacity: 0.35; } to { transform: none; opacity: 1; } }
+    .view-enter-next { animation: view-in-next 0.18s ease-out; }
+    .view-enter-prev { animation: view-in-prev 0.18s ease-out; }
+
+    .help-list { display: flex; flex-direction: column; gap: 14px; }
+    .help-row { display: flex; gap: 12px; align-items: flex-start; line-height: 1.45; }
+    .help-row b { display: block; font-size: 0.82rem; }
+    .help-icon {
+      flex-shrink: 0; width: 30px; height: 30px; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 0.95rem;
+      background: var(--clr-yellow); color: #000; border: var(--border);
+    }
+    .help-desc { display: block; font-size: 0.75rem; opacity: 0.72; margin-top: 2px; }
+
+    #coach {
+      position: fixed; z-index: 1300;
+      left: calc(12px + var(--safe-left)); right: calc(12px + var(--safe-right));
+      bottom: calc(var(--bottomnav-h) + var(--safe-bottom) + 14px);
+      background: var(--clr-surface); border: var(--border-thick);
+      box-shadow: var(--shadow-lg); padding: 14px;
+      display: flex; flex-direction: column; gap: 9px;
+      animation: coach-in 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    @keyframes coach-in { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+    .coach-title {
+      font-family: var(--font-mono); font-size: 0.65rem; font-weight: 700;
+      letter-spacing: 0.12em; opacity: 0.6;
+    }
+    .coach-row { display: flex; align-items: center; gap: 10px; font-size: 0.8rem; font-weight: 600; }
+    .coach-row .help-icon { width: 26px; height: 26px; font-size: 0.85rem; }
+    .coach-actions { display: flex; gap: 8px; margin-top: 4px; }
+    .coach-actions .btn { flex: 1; justify-content: center; }
+
     /* ── MOBILE-ONLY COMPONENTS (inert on desktop) ── */
     #sidebar-backdrop {
       /* Starts below the topbar so the header stays live — tapping ☰ again,
@@ -990,7 +1025,8 @@
     /* ── RESPECT REDUCED MOTION ── */
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
-      #sidebar, #sidebar-backdrop, .toast, #modal-box, #palette-box, .tree-caret {
+      #sidebar, #sidebar-backdrop, .toast, #modal-box, #palette-box, .tree-caret,
+      #coach, .view-enter-next, .view-enter-prev {
         transition: none !important; animation: none !important;
       }
     }
@@ -1559,6 +1595,9 @@ function processData(data) {
   } else {
     activateView(State.currentView, data);
   }
+
+  // Gestures only make sense once something is on screen.
+  setTimeout(maybeShowCoach, 700);
 }
 
 function applyAutoView(type, data) {
@@ -2990,6 +3029,7 @@ const Palette = {
     { title: 'Switch View: STATS', action: () => { State.currentView='stats'; setToggleActive('stats'); activateView('stats'); } },
     { title: 'Switch View: RAW',   action: () => { State.currentView='raw'; setToggleActive('raw'); activateView('raw'); } },
     { title: 'Switch View: DIFF',  action: () => { State.currentView='diff'; setToggleActive('diff'); activateView('diff'); } },
+    { title: 'Gestures & Shortcuts (Help)', action: () => openHelpSheet() },
     { title: 'Toggle Theme (Dark/Light)', action: () => $('btn-theme-toggle').click() },
     { title: 'Open Entries / Schema Panel', action: () => (isMobile() ? openDrawer() : DOM.sidebar.classList.remove('hidden')) },
     { title: 'Load Another File',  action: () => $('btn-load-new').click() },
@@ -3045,6 +3085,173 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '4') { State.currentView='tree'; setToggleActive('tree'); activateView('tree'); }
   if (e.key === 'd') { $('btn-theme-toggle').click(); }
 });
+
+/* ── SWIPE BETWEEN VIEWS ──
+   A phone has no room for a "next view" affordance, so the content area is
+   swipeable. The gesture yields to anything that legitimately scrolls
+   sideways (the grid, code blocks) and to the drawer's edge swipe. */
+const SWIPE_MIN_DIST = 60;      // px before a drag counts as a swipe
+const SWIPE_RATIO    = 1.6;     // how much more horizontal than vertical
+const SWIPE_MAX_MS   = 700;     // slower than this reads as a scroll, not a flick
+
+function visibleViewName() {
+  if (DOM.chatView.style.display  !== 'none') return 'chat';
+  if (DOM.tableView.style.display !== 'none') return 'table';
+  if (DOM.statsView.style.display !== 'none') return 'stats';
+  if (DOM.rawView.style.display   !== 'none') return 'raw';
+  if (DOM.diffView.style.display  !== 'none') return 'diff';
+  if (DOM.treeView.style.display  !== 'none') return 'tree';
+  return null;
+}
+
+/* Only views that can actually render this document — swiping into a view
+   that silently falls back to the tree would feel broken. */
+function swipeableViews() {
+  const isChat  = State.jsonType === 'chat' || State.jsonType === 'chat-single';
+  const isArray = Array.isArray(State.modifiedData);
+  const views = [];
+  if (isChat) views.push('chat');
+  if (isArray) views.push('table');
+  views.push('tree');
+  if (isArray) views.push('stats');
+  views.push('raw');
+  if (State.diffDataA && State.diffDataB) views.push('diff');
+  return views;
+}
+
+function swipeToView(dir) {
+  const views = swipeableViews();
+  const current = visibleViewName();
+  const idx = views.indexOf(current);
+  if (idx === -1) return false;
+  const next = views[idx + dir];
+  if (!next) return false;
+
+  State.currentView = next;
+  setToggleActive(next);
+  activateView(next, State.modifiedData);
+
+  const host = { chat: DOM.chatView, table: DOM.tableView, tree: DOM.treeView,
+                 stats: DOM.statsView, raw: DOM.rawView, diff: DOM.diffView }[next];
+  if (host) {
+    const cls = dir > 0 ? 'view-enter-next' : 'view-enter-prev';
+    host.classList.remove('view-enter-next', 'view-enter-prev');
+    void host.offsetWidth; // restart the animation
+    host.classList.add(cls);
+    host.addEventListener('animationend', () => host.classList.remove(cls), { once: true });
+  }
+  haptic();
+  return true;
+}
+
+/* Walks up from the touch target: if something under the finger can still
+   scroll horizontally in the swipe direction, that scroll wins. */
+function scrollableSideways(target, dx) {
+  let node = target;
+  while (node && node !== document.body) {
+    if (node.scrollWidth > node.clientWidth + 2) {
+      const atStart = node.scrollLeft <= 0;
+      const atEnd   = node.scrollLeft >= node.scrollWidth - node.clientWidth - 1;
+      if ((dx > 0 && !atStart) || (dx < 0 && !atEnd)) return true;
+    }
+    node = node.parentElement;
+  }
+  return false;
+}
+
+(function initViewSwipe() {
+  let startX = 0, startY = 0, startT = 0, active = false;
+
+  DOM.contentArea.addEventListener('touchstart', (e) => {
+    active = false;
+    if (!isMobile() || e.touches.length !== 1) return;
+    if (State.drawerOpen) return;
+    if (DOM.paletteOverlay.classList.contains('open') || DOM.modalOverlay.classList.contains('open')) return;
+    const t = e.touches[0];
+    if (t.clientX <= 24) return; // reserved for the drawer's edge swipe
+    startX = t.clientX; startY = t.clientY; startT = Date.now();
+    active = true;
+  }, { passive: true });
+
+  DOM.contentArea.addEventListener('touchend', (e) => {
+    if (!active) return;
+    active = false;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    const dt = Date.now() - startT;
+
+    if (Math.abs(dx) < SWIPE_MIN_DIST) return;
+    if (Math.abs(dx) < Math.abs(dy) * SWIPE_RATIO) return;
+    if (dt > SWIPE_MAX_MS && Math.abs(dx) < window.innerWidth * 0.3) return;
+    if (scrollableSideways(e.target, dx)) return;
+
+    swipeToView(dx < 0 ? 1 : -1);
+  }, { passive: true });
+})();
+
+/* ── TELLING PEOPLE THE GESTURES EXIST ──
+   An invisible gesture is not a feature, so it is announced once and then
+   stays documented in the help sheet. */
+const GESTURES = [
+  ['↔', 'Swipe the content left or right', 'Move to the next or previous view'],
+  ['→', 'Swipe in from the left edge', 'Open entries, conversations and schema'],
+  ['←', 'Swipe the panel away', 'Close it again (or tap outside)'],
+  ['⌘', 'Tap the command button', 'Share, export, copy, download — everything not on screen'],
+  ['▤', 'Tap CARDS / GRID', 'Switch between stacked cards and the scrollable grid'],
+  ['✎', 'Tap any value in TREE', 'Edit it inline, then export the modified JSON'],
+  ['↑', 'Tap the floating arrow', 'Jump back to the top of a long list'],
+];
+
+function openHelpSheet() {
+  DOM.modalTitle.replaceChildren(txt('GESTURES & SHORTCUTS'));
+  DOM.modalBody.replaceChildren();
+  const list = el('div', { class: 'help-list' });
+  GESTURES.forEach(([icon, title, desc]) => {
+    list.appendChild(el('div', { class: 'help-row' }, [
+      el('span', { class: 'help-icon' }, [icon]),
+      el('span', {}, [el('b', {}, [title]), el('span', { class: 'help-desc' }, [desc])]),
+    ]));
+  });
+  if (!isMobile()) {
+    list.appendChild(el('div', { class: 'help-row' }, [
+      el('span', { class: 'help-icon' }, ['⌨']),
+      el('span', {}, [el('b', {}, ['Cmd/Ctrl+K, 1–4, D, Esc']),
+                      el('span', { class: 'help-desc' }, ['Palette, quick views, dark mode, dismiss'])]),
+    ]));
+  }
+  DOM.modalBody.appendChild(list);
+  DOM.modalOverlay.classList.add('open');
+}
+
+const COACH_SEEN_KEY = 'jsonbrut-coach-seen';
+
+function maybeShowCoach() {
+  if (!isMobile() || State.coachShown) return;
+  try { if (localStorage.getItem(COACH_SEEN_KEY)) return; } catch { return; }
+  State.coachShown = true;
+
+  const card = el('div', { id: 'coach', role: 'status' });
+  card.appendChild(el('div', { class: 'coach-title' }, ['TRY THESE']));
+  // Swipe, drawer, and the command button — the three that unlock everything else.
+  [GESTURES[0], GESTURES[1], GESTURES[3]].forEach(([icon, title]) => {
+    card.appendChild(el('div', { class: 'coach-row' }, [
+      el('span', { class: 'help-icon' }, [icon]), el('span', {}, [title]),
+    ]));
+  });
+  const row = el('div', { class: 'coach-actions' });
+  const more = el('button', { class: 'btn btn-white', type: 'button' }, ['SEE ALL']);
+  const got  = el('button', { class: 'btn btn-yellow', type: 'button' }, ['GOT IT']);
+  const dismiss = () => {
+    card.remove();
+    try { localStorage.setItem(COACH_SEEN_KEY, '1'); } catch {}
+  };
+  more.addEventListener('click', () => { dismiss(); openHelpSheet(); });
+  got.addEventListener('click', () => { dismiss(); haptic(); });
+  row.appendChild(more); row.appendChild(got);
+  card.appendChild(row);
+  document.body.appendChild(card);
+}
 
 /* ── MODAL ── */
 function openModal(key, value) {
