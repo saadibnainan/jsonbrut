@@ -645,6 +645,19 @@
     [data-theme="dark"] .row-card { background: var(--clr-surface); }
     [data-theme="dark"] .row-card-head { background: #000; }
     [data-theme="dark"] .rc-field { border-bottom-color: #2a2a2a; }
+    .raw-more, .diff-more { padding: 14px 12px 20px; display: flex; justify-content: center; }
+    .raw-more .btn, .diff-more .btn { width: 100%; max-width: 420px; justify-content: center; }
+    .raw-more.done {
+      font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700;
+      letter-spacing: 0.06em; opacity: 0.6; color: var(--clr-yellow); white-space: normal;
+    }
+    .table-more { padding: 14px 12px 20px; display: flex; justify-content: center; }
+    .table-more .btn { width: 100%; max-width: 420px; justify-content: center; }
+    .table-more.done {
+      font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700;
+      letter-spacing: 0.08em; opacity: 0.5; text-transform: uppercase;
+    }
+    tr.table-more td { border: none; padding: 0; }
     #table-cards-empty { font-family: var(--font-mono); font-size: 0.78rem; padding: 24px 12px; text-align: center; opacity: 0.7; }
 
     /* Collapsible schema panel (keeps the drawer usable on short screens) */
@@ -1285,6 +1298,13 @@ function el(tag, attrs, children) {
 }
 function txt(s) { return document.createTextNode(String(s ?? '')); }
 
+/* Filtering re-scans every row, so typing on a phone must not run it per
+   keystroke. */
+function debounce(fn, ms) {
+  let t;
+  return function (...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
+}
+
 /* ── FEEDBACK: toasts + haptics (alert() is hostile on a phone) ── */
 function haptic(ms) {
   if (!isTouch()) return;
@@ -1362,11 +1382,17 @@ function detectType(data) {
 }
 
 /* ── TAB & FILE MANAGEMENT ── */
-function addTab(fileName, data) {
+function deepClone(data) {
+  // structuredClone avoids a full serialize+parse round trip on large files.
+  try { return structuredClone(data); }
+  catch { return JSON.parse(JSON.stringify(data)); }
+}
+
+function addTab(fileName, data, bytes) {
   const tabId = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   const tab = {
     id: tabId, fileName: fileName || 'file.json', rawData: data,
-    modifiedData: JSON.parse(JSON.stringify(data)), editCount: 0,
+    modifiedData: deepClone(data), editCount: 0, bytes: bytes ?? null,
     jsonType: detectType(data), activeConvIndex: 0, currentView: State.currentView,
     pinnedCols: []
   };
@@ -1386,6 +1412,7 @@ function switchTab(tabId) {
   State.activeConvIndex = tab.activeConvIndex;
   State.editCount = tab.editCount;
   State.pinnedCols = tab.pinnedCols;
+  State.sourceBytes = tab.bytes;
   updateEditIndicator();
   processData(State.modifiedData);
   renderTabs();
@@ -1439,11 +1466,17 @@ function updateEditIndicator() {
   DOM.btnDownloadMod.style.display = State.editCount > 0 ? 'inline-flex' : 'none';
 }
 
+const LARGE_FILE_BYTES = 2 * 1024 * 1024; // where a phone starts to feel it
+
 function loadJSON(text, fileName) {
   let data;
   try { data = JSON.parse(text); }
   catch (e) { showError('Invalid JSON: ' + e.message); return; }
-  addTab(fileName || 'data.json', data);
+  const bytes = text.length;
+  if (bytes > LARGE_FILE_BYTES) {
+    toast('Large file (' + (bytes / 1048576).toFixed(1) + ' MB) — rendering in chunks');
+  }
+  addTab(fileName || 'data.json', data, bytes);
 }
 
 /* ── FILE INPUT & DRAG DROP ── */
@@ -1517,7 +1550,9 @@ function processData(data) {
   if (isMobile()) closeDrawer();
 
   renderStatsBar(data, type);
-  renderSchemaInference(data);
+  // The drawer is closed on mobile, so the schema is computed when it opens.
+  if (isMobile()) State.schemaDirty = true;
+  else renderSchemaInference(data);
 
   if (State.currentView === 'auto') {
     applyAutoView(type, data);
@@ -1552,9 +1587,9 @@ function activateView(view, data) {
       break;
     case 'table':
       if (Array.isArray(d)) {
-        buildTableData(d); renderTable();
+        buildTableData(d);
         DOM.tableView.style.display  = 'flex';
-        DOM.pagination.style.display = 'flex';
+        renderTable(); // owns pager vs. infinite-scroll footer visibility
       } else { renderTree(d); DOM.treeView.style.display = 'flex'; }
       break;
     case 'tree':
@@ -1589,10 +1624,16 @@ function renderStatsBar(data, type) {
   } else if (data && typeof data === 'object') {
     stats.push({ label: 'KEYS', val: Object.keys(data).length });
   }
+  // Re-measuring means serialising the whole document; for big files the size
+  // recorded at parse time is used instead.
+  let bytes = State.sourceBytes;
   try {
-    const kb = (JSON.stringify(data).length / 1024).toFixed(1);
-    stats.push({ label: 'SIZE', val: kb + ' KB' });
+    if (bytes == null || bytes < 2e6) bytes = JSON.stringify(data).length;
   } catch {}
+  if (bytes != null) {
+    const size = bytes > 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : (bytes / 1024).toFixed(1) + ' KB';
+    stats.push({ label: 'SIZE', val: size });
+  }
   stats.push({ label: 'FILE', val: State.fileName });
 
   for (const s of stats) {
@@ -1621,6 +1662,10 @@ function setToggleActive(view) {
 
 /* ── SIDEBAR: desktop column, mobile off-canvas drawer ── */
 function openDrawer() {
+  if (State.schemaDirty && State.modifiedData !== null) {
+    renderSchemaInference(State.modifiedData);
+    State.schemaDirty = false;
+  }
   State.drawerOpen = true;
   document.body.classList.add('drawer-open');
   DOM.backdrop.hidden = false;
@@ -1734,16 +1779,29 @@ function renderSchemaInference(data) {
   DOM.schemaTree.appendChild(buildSchemaNode('root', schema));
 }
 
-function inferSchema(val) {
+const SCHEMA_SAMPLE = 200;   // array items inspected for item types
+const SCHEMA_MAX_PROPS = 200; // props walked per object
+const SCHEMA_MAX_DEPTH = 8;
+
+function inferSchema(val, depth) {
+  depth = depth || 0;
   if (val === null) return { type: 'null' };
   if (Array.isArray(val)) {
-    const itemTypes = new Set(val.map(v => typeof v));
-    return { type: 'array', length: val.length, itemTypes: Array.from(itemTypes) };
+    // Sampled: mapping a million-item array just to collect typeof froze phones.
+    const sample = val.length > SCHEMA_SAMPLE ? val.slice(0, SCHEMA_SAMPLE) : val;
+    const itemTypes = new Set(sample.map(v => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v)));
+    const schema = { type: 'array', length: val.length, itemTypes: Array.from(itemTypes) };
+    if (val.length > SCHEMA_SAMPLE) schema.sampled = SCHEMA_SAMPLE;
+    return schema;
   }
   if (typeof val === 'object') {
+    if (depth >= SCHEMA_MAX_DEPTH) return { type: 'object', truncated: 'depth' };
+    const entries = Object.entries(val);
     const props = {};
-    Object.entries(val).forEach(([k, v]) => { props[k] = inferSchema(v); });
-    return { type: 'object', props };
+    entries.slice(0, SCHEMA_MAX_PROPS).forEach(([k, v]) => { props[k] = inferSchema(v, depth + 1); });
+    const schema = { type: 'object', props };
+    if (entries.length > SCHEMA_MAX_PROPS) schema.truncated = entries.length + ' props';
+    return schema;
   }
   return { type: typeof val };
 }
@@ -1830,7 +1888,7 @@ function renderChatSidebar(data) {
 
   render('');
   DOM.sidebarSearch.value = '';
-  DOM.sidebarSearch.oninput = (e) => render(e.target.value);
+  DOM.sidebarSearch.oninput = debounce((e) => render(e.target.value), 140);
   if (convs.length > 0) renderChatConversation(convs[0]);
 }
 
@@ -1973,17 +2031,71 @@ function getFilteredRows() {
   return rows;
 }
 
+/* ── TABLE RENDERING ──
+   Rows are built in chunks and cached, so neither a 50k-row file nor a
+   scroll-to-the-bottom ever builds the whole grid up front. */
+const ROW_CHUNK = 50;
+
+// Phones drop the fixed pager (60px of a 660px screen) for infinite scroll.
+function infiniteMode() { return isMobile(); }
+
 function renderTable() {
-  const rows  = getFilteredRows();
+  const rows = getFilteredRows();
   const total = rows.length;
-  const ps    = State.tablePageSize;
-  const page  = State.tablePage;
-  const slice = rows.slice((page - 1) * ps, page * ps);
-  const pages = Math.ceil(total / ps) || 1;
 
   // Header reordering (pinned cols first)
   const sortedCols = [...State.pinnedCols, ...State.tableColumns.filter(c => !State.pinnedCols.includes(c))];
+  renderTableHead(sortedCols);
 
+  // Min/Max per column for the heatmap — one pass over the rows, not one per column.
+  const colMinMax = {};
+  if (State.heatmapOn) {
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      for (const col of sortedCols) {
+        const v = row[col];
+        if (typeof v !== 'number' || !isFinite(v)) continue;
+        const mm = colMinMax[col];
+        if (!mm) colMinMax[col] = { min: v, max: v };
+        else { if (v < mm.min) mm.min = v; if (v > mm.max) mm.max = v; }
+      }
+    }
+  }
+
+  // Cached so appending the next chunk does not redo any of the above.
+  State.tableRows   = rows;
+  State.tableCols   = sortedCols;
+  State.tableMinMax = colMinMax;
+
+  DOM.tableBody.replaceChildren();
+  DOM.tableCards.replaceChildren();
+
+  let start = 0, end = 0;
+  if (!total) {
+    const tr = el('tr');
+    const td = document.createElement('td');
+    td.colSpan = Math.max(sortedCols.length, 1);
+    td.appendChild(txt('No results.'));
+    tr.appendChild(td);
+    DOM.tableBody.appendChild(tr);
+    DOM.tableCards.appendChild(el('div', { id: 'table-cards-empty' }, ['No results.']));
+  } else if (infiniteMode()) {
+    end = Math.min(ROW_CHUNK, total);
+    appendRowRange(0, end);
+  } else {
+    const ps = State.tablePageSize;
+    start = Math.min((State.tablePage - 1) * ps, Math.max(total - 1, 0));
+    end   = Math.min(start + ps, total);
+    appendRowRange(start, end);
+  }
+  State.tableShown = end;
+
+  syncSortControls();
+  applyTableLayout();
+  syncTableFooter();
+}
+
+function renderTableHead(sortedCols) {
   DOM.tableHead.replaceChildren();
   const htr = el('tr');
   sortedCols.forEach((col) => {
@@ -2002,52 +2114,48 @@ function renderTable() {
     th.addEventListener('click', () => {
       if (State.tableSort.col === col) State.tableSort.dir = State.tableSort.dir === 'asc' ? 'desc' : 'asc';
       else { State.tableSort.col = col; State.tableSort.dir = 'asc'; }
-      State.tablePage = 1; renderTable();
+      State.tablePage = 1;
+      renderTable();
     });
     htr.appendChild(th);
   });
   DOM.tableHead.appendChild(htr);
+}
 
-  // Min/Max stats for heatmap
-  const colMinMax = {};
-  if (State.heatmapOn) {
-    sortedCols.forEach(col => {
-      const nums = rows.map(r => r?.[col]).filter(v => typeof v === 'number');
-      if (nums.length > 0) colMinMax[col] = { min: Math.min(...nums), max: Math.max(...nums) };
-    });
+/* Builds rows [from, to) into whichever representation is on screen — building
+   both would double the DOM for no visible gain. */
+function appendRowRange(from, to) {
+  removeTableFooter();
+  const cards = cardsActive();
+  const cols = State.tableCols;
+  const mm   = State.tableMinMax;
+  const rows = State.tableRows;
+  const frag = document.createDocumentFragment();
+  const titleKey = cards ? ['name', 'title', 'id', 'label', 'key'].find((k) => cols.includes(k)) : null;
+
+  for (let i = from; i < to; i++) {
+    frag.appendChild(cards ? buildRowCard(rows[i], i, cols, mm, titleKey) : buildRowTr(rows[i], cols, mm));
   }
+  (cards ? DOM.tableCards : DOM.tableBody).appendChild(frag);
+}
 
-  DOM.tableBody.replaceChildren();
-  if (!slice.length) {
-    const r = el('tr'); const td = document.createElement('td');
-    td.colSpan = sortedCols.length; td.appendChild(txt('No results.'));
-    r.appendChild(td); DOM.tableBody.appendChild(r);
-  } else {
-    slice.forEach((row) => {
-      const tr = el('tr');
-      sortedCols.forEach((col) => {
-        const isPinned = State.pinnedCols.includes(col);
-        const td = el('td', { class: isPinned ? 'pinned' : '' });
-        const val = row?.[col];
-        if (State.heatmapOn && typeof val === 'number' && colMinMax[col] && colMinMax[col].max > colMinMax[col].min) {
-          const ratio = (val - colMinMax[col].min) / (colMinMax[col].max - colMinMax[col].min);
-          td.style.backgroundColor = `hsl(${240 - ratio * 240}, 80%, ${isDark() ? '25%' : '88%'})`;
-        }
-        renderCell(val, td, col);
-        tr.appendChild(td);
-      });
-      DOM.tableBody.appendChild(tr);
-    });
-  }
+function heatColor(val, mm) {
+  if (!State.heatmapOn || typeof val !== 'number' || !mm || mm.max <= mm.min) return '';
+  const ratio = (val - mm.min) / (mm.max - mm.min);
+  return `hsl(${240 - ratio * 240}, 80%, ${isDark() ? '25%' : '88%'})`;
+}
 
-  if (cardsActive()) renderTableCards(slice, sortedCols, colMinMax, (page - 1) * ps);
-  syncSortControls();
-  applyTableLayout();
-
-  DOM.tableInfo.replaceChildren(txt(total + ' rows · page ' + page + '/' + pages));
-  DOM.pageInfo.replaceChildren(txt('PAGE ' + page + ' / ' + pages));
-  $('btn-prev').disabled = page <= 1;
-  $('btn-next').disabled = page >= pages;
+function buildRowTr(row, cols, minMax) {
+  const tr = el('tr');
+  cols.forEach((col) => {
+    const td = el('td', { class: State.pinnedCols.includes(col) ? 'pinned' : '' });
+    const val = row?.[col];
+    const bg = heatColor(val, minMax[col]);
+    if (bg) td.style.backgroundColor = bg;
+    renderCell(val, td, col);
+    tr.appendChild(td);
+  });
+  return tr;
 }
 
 /* ── MOBILE TABLE: stacked cards ──
@@ -2064,51 +2172,117 @@ function applyTableLayout() {
   $('btn-table-layout').textContent = cards ? '▦ GRID' : '▤ CARDS';
 }
 
-function renderTableCards(rows, cols, colMinMax, offset) {
-  DOM.tableCards.replaceChildren();
-  if (!rows.length) {
-    DOM.tableCards.appendChild(el('div', { id: 'table-cards-empty' }, ['No results.']));
+function buildRowCard(row, index, cols, minMax, titleKey) {
+  const num  = index + 1;
+  const card = el('div', { class: 'row-card', role: 'listitem' });
+  let title = '';
+  if (row && typeof row === 'object' && titleKey && row[titleKey] != null && typeof row[titleKey] !== 'object') {
+    title = String(row[titleKey]);
+    if (title.length > 30) title = title.slice(0, 29) + '…';
+  }
+  card.appendChild(el('div', { class: 'row-card-head' }, [
+    el('span', {}, [title || 'ROW ' + num]),
+    el('span', {}, ['#' + num]),
+  ]));
+
+  const body = el('div', { class: 'row-card-body' });
+  if (row === null || typeof row !== 'object') {
+    const val = el('div', { class: 'rc-val' });
+    renderCell(row, val, 'value');
+    body.appendChild(el('div', { class: 'rc-field' }, [el('div', { class: 'rc-key' }, ['VALUE']), val]));
+  } else {
+    cols.forEach((col) => {
+      if (!(col in row)) return; // omit keys this row does not have — keeps cards short
+      const val = row[col];
+      const valEl = el('div', { class: 'rc-val' });
+      const bg = heatColor(val, minMax[col]);
+      if (bg) valEl.style.backgroundColor = bg;
+      renderCell(val, valEl, col);
+      body.appendChild(el('div', { class: 'rc-field' }, [el('div', { class: 'rc-key' }, [col]), valEl]));
+    });
+  }
+  card.appendChild(body);
+  return card;
+}
+
+/* ── INFINITE SCROLL FOOTER ── */
+function removeTableFooter() {
+  document.querySelectorAll('.table-more').forEach((n) => n.remove());
+}
+
+function syncTableFooter() {
+  removeTableFooter();
+  DOM.pagination.style.display = infiniteMode() ? 'none' : 'flex';
+
+  const total = State.tableRows ? State.tableRows.length : 0;
+  const shown = State.tableShown || 0;
+
+  if (!infiniteMode()) {
+    const ps = State.tablePageSize;
+    const pages = Math.ceil(total / ps) || 1;
+    DOM.tableInfo.replaceChildren(txt(total + ' rows · page ' + State.tablePage + '/' + pages));
+    DOM.pageInfo.replaceChildren(txt('PAGE ' + State.tablePage + ' / ' + pages));
+    $('btn-prev').disabled = State.tablePage <= 1;
+    $('btn-next').disabled = State.tablePage >= pages;
     return;
   }
-  const dark = isDark();
-  const titleKey = ['name', 'title', 'id', 'label', 'key'].find((k) => cols.includes(k));
 
-  rows.forEach((row, i) => {
-    const num  = offset + i + 1;
-    const card = el('div', { class: 'row-card', role: 'listitem' });
-    let title = '';
-    if (row && typeof row === 'object' && titleKey && row[titleKey] != null && typeof row[titleKey] !== 'object') {
-      title = String(row[titleKey]);
-      if (title.length > 30) title = title.slice(0, 29) + '…';
-    }
-    card.appendChild(el('div', { class: 'row-card-head' }, [
-      el('span', {}, [title || 'ROW ' + num]),
-      el('span', {}, ['#' + num]),
-    ]));
+  DOM.tableInfo.replaceChildren(txt(total + ' rows'));
+  if (!total) return;
 
-    const body = el('div', { class: 'row-card-body' });
-    if (row === null || typeof row !== 'object') {
-      const val = el('div', { class: 'rc-val' });
-      renderCell(row, val, 'value');
-      body.appendChild(el('div', { class: 'rc-field' }, [el('div', { class: 'rc-key' }, ['VALUE']), val]));
-    } else {
-      cols.forEach((col) => {
-        if (!(col in row)) return; // omit keys this row does not have — keeps cards short
-        const val = row[col];
-        const valEl = el('div', { class: 'rc-val' });
-        const mm = colMinMax[col];
-        if (State.heatmapOn && typeof val === 'number' && mm && mm.max > mm.min) {
-          const ratio = (val - mm.min) / (mm.max - mm.min);
-          valEl.style.backgroundColor = `hsl(${240 - ratio * 240}, 80%, ${dark ? '25%' : '88%'})`;
-        }
-        renderCell(val, valEl, col);
-        body.appendChild(el('div', { class: 'rc-field' }, [el('div', { class: 'rc-key' }, [col]), valEl]));
-      });
-    }
-    card.appendChild(body);
-    DOM.tableCards.appendChild(card);
-  });
+  const done = shown >= total;
+  const label = done
+    ? 'END · ' + total.toLocaleString() + ' ROWS'
+    : 'LOAD MORE · ' + shown.toLocaleString() + ' / ' + total.toLocaleString();
+
+  const footer = el('div', { class: 'table-more' + (done ? ' done' : '') });
+  if (done) {
+    footer.appendChild(txt(label));
+  } else {
+    const btn = el('button', { class: 'btn btn-yellow', type: 'button' }, [label]);
+    btn.addEventListener('click', () => { growTable(); haptic(); });
+    footer.appendChild(btn);
+  }
+
+  if (cardsActive()) {
+    DOM.tableCards.appendChild(footer);
+  } else {
+    const tr = el('tr', { class: 'table-more' + (done ? ' done' : '') });
+    const td = document.createElement('td');
+    td.colSpan = Math.max(State.tableCols.length, 1);
+    td.appendChild(footer.firstChild);
+    tr.appendChild(td);
+    DOM.tableBody.appendChild(tr);
+  }
 }
+
+function growTable() {
+  const total = State.tableRows ? State.tableRows.length : 0;
+  const from = State.tableShown || 0;
+  const to = Math.min(from + ROW_CHUNK, total);
+  if (from >= to) return;
+  appendRowRange(from, to);
+  State.tableShown = to;
+  syncTableFooter();
+}
+
+/* Grow when the scroller nears its end, rAF-guarded so a fast flick does not
+   queue a growth per scroll event. */
+(function initInfiniteScroll() {
+  let pending = false;
+  const onScroll = (e) => {
+    if (!infiniteMode() || pending) return;
+    if (State.tableShown >= (State.tableRows ? State.tableRows.length : 0)) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      const sc = e.target;
+      if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 400) growTable();
+    });
+  };
+  DOM.tableCards.addEventListener('scroll', onScroll, { passive: true });
+  DOM.tableWrapper.addEventListener('scroll', onScroll, { passive: true });
+})();
 
 /* Column headers are the desktop sort control; phones get a select instead. */
 function syncSortControls() {
@@ -2160,7 +2334,11 @@ function renderCell(val, td, colKey) {
   } else { td.appendChild(txt(s)); }
 }
 
-DOM.tableSearch.addEventListener('input', (e) => { State.tableFilter = e.target.value; State.tablePage = 1; renderTable(); });
+DOM.tableSearch.addEventListener('input', debounce((e) => {
+  State.tableFilter = e.target.value;
+  State.tablePage = 1;
+  renderTable();
+}, 160));
 $('btn-prev').addEventListener('click', () => { State.tablePage--; renderTable(); });
 $('btn-next').addEventListener('click', () => { State.tablePage++; renderTable(); });
 $('btn-toggle-heatmap').addEventListener('click', () => {
@@ -2348,11 +2526,18 @@ function buildTreeNode(key, value, depth, open, pathArr) {
   return node;
 }
 
+const EXPAND_CAP = 800; // one tap must not try to build 100k nodes
+
 $('btn-expand-all').addEventListener('click', () => {
-  DOM.treeContainer.querySelectorAll('.tree-toggle').forEach((t) => {
+  const toggles = Array.from(DOM.treeContainer.querySelectorAll('.tree-toggle'));
+  toggles.slice(0, EXPAND_CAP).forEach((t) => {
     const ch = t.nextElementSibling;
     if (ch && !ch.classList.contains('open')) t.click();
   });
+  if (toggles.length > EXPAND_CAP) {
+    toast('Expanded ' + EXPAND_CAP + ' of ' + toggles.length + ' nodes — tap again for more');
+  }
+  haptic();
 });
 $('btn-collapse-all').addEventListener('click', () => {
   DOM.treeContainer.querySelectorAll('.tree-children.open').forEach((c) => {
@@ -2362,13 +2547,13 @@ $('btn-collapse-all').addEventListener('click', () => {
   });
 });
 
-$('tree-search').addEventListener('input', (e) => {
+$('tree-search').addEventListener('input', debounce((e) => {
   const term = e.target.value.trim().toLowerCase();
   DOM.treeContainer.querySelectorAll('.tree-node').forEach((n) => {
     n.style.display    = (!term || n.textContent.toLowerCase().includes(term)) ? '' : 'none';
     n.style.background = (term && n.textContent.toLowerCase().includes(term)) ? '#fffef0' : '';
   });
-});
+}, 160));
 
 $('btn-download-mod').addEventListener('click', () => {
   downloadFile(JSON.stringify(State.modifiedData, null, 2), 'modified_' + State.fileName, 'application/json');
@@ -2577,19 +2762,72 @@ function drawBarChart(canvasId, labels, values, color) {
 }
 
 /* ── RAW VIEW ── */
+/* Pretty-printing a 20MB file yields ~700k lines; one <div> per line number
+   would be 700k nodes. Lines are appended in chunks as you scroll instead. */
+const RAW_LINE_CHUNK = 1500;
+const RAW_CHAR_CAP   = 400000; // guards a single huge minified line
+
 function renderRawView(data) {
   const text = State.rawMode === 'pretty' ? JSON.stringify(data, null, 2) : JSON.stringify(data);
-  const lines = text.split('\n');
+  State.rawLines = text.split('\n');
+  State.rawShown = 0;
 
   // Line numbers stop lining up once lines wrap, so they hide in wrap mode.
   DOM.rawContainer.classList.toggle('wrap', State.rawWrap);
   $('raw-line-numbers').style.display = State.rawWrap ? 'none' : '';
   $('raw-line-numbers').replaceChildren();
-  if (!State.rawWrap) lines.forEach((_, i) => $('raw-line-numbers').appendChild(el('div', {}, [String(i + 1)])));
-  $('raw-code').replaceChildren(txt(text));
+  $('raw-code').replaceChildren();
   $('btn-raw-wrap').classList.toggle('btn-yellow', State.rawWrap);
   $('btn-raw-wrap').classList.toggle('btn-white', !State.rawWrap);
+  growRaw();
 }
+
+function growRaw() {
+  const lines = State.rawLines || [];
+  const from = State.rawShown || 0;
+  const to = Math.min(from + RAW_LINE_CHUNK, lines.length);
+  if (from >= to) return;
+
+  $('raw-code').querySelectorAll('.raw-more').forEach((n) => n.remove());
+
+  let chunk = lines.slice(from, to).join('\n');
+  const clipped = chunk.length > RAW_CHAR_CAP;
+  if (clipped) chunk = chunk.slice(0, RAW_CHAR_CAP);
+  $('raw-code').appendChild(txt((from ? '\n' : '') + chunk));
+
+  if (!State.rawWrap) {
+    const frag = document.createDocumentFragment();
+    for (let i = from; i < to; i++) frag.appendChild(el('div', {}, [String(i + 1)]));
+    $('raw-line-numbers').appendChild(frag);
+  }
+
+  State.rawShown = clipped ? lines.length : to;
+
+  if (clipped) {
+    $('raw-code').appendChild(el('div', { class: 'raw-more done' },
+      ['— TRUNCATED FOR DISPLAY · USE 📋 COPY FOR THE FULL JSON —']));
+  } else if (State.rawShown < lines.length) {
+    const more = el('div', { class: 'raw-more' });
+    const btn = el('button', { class: 'btn btn-yellow', type: 'button' },
+      ['LOAD MORE · ' + State.rawShown.toLocaleString() + ' / ' + lines.length.toLocaleString() + ' LINES']);
+    btn.addEventListener('click', () => { growRaw(); haptic(); });
+    more.appendChild(btn);
+    $('raw-code').appendChild(more);
+  }
+}
+
+(function initRawScroll() {
+  let pending = false;
+  DOM.rawContainer.addEventListener('scroll', (e) => {
+    if (pending || !State.rawLines || State.rawShown >= State.rawLines.length) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      const sc = e.target;
+      if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 400) growRaw();
+    });
+  }, { passive: true });
+})();
 
 $('btn-raw-pretty').addEventListener('click', () => { State.rawMode = 'pretty'; renderRawView(State.modifiedData); });
 $('btn-raw-mini').addEventListener('click',   () => { State.rawMode = 'mini';   renderRawView(State.modifiedData); });
@@ -2597,28 +2835,56 @@ $('btn-raw-wrap').addEventListener('click',   () => { State.rawWrap = !State.raw
 $('btn-raw-copy').addEventListener('click',   () => copyText(JSON.stringify(State.modifiedData, null, 2), 'Raw JSON copied'));
 
 /* ── DIFF VIEW ── */
+const DIFF_CHUNK = 800;
+
 function renderDiffView() {
   if (!State.diffDataA || !State.diffDataB) return;
   const linesA = JSON.stringify(State.diffDataA, null, 2).split('\n');
   const linesB = JSON.stringify(State.diffDataB, null, 2).split('\n');
 
-  const diffOut = $('diff-output');
-  diffOut.replaceChildren();
-
+  // The whole comparison is counted up front; only the rows are chunked.
   let add = 0, del = 0;
+  const rows = [];
   linesB.forEach((l, i) => {
     if (linesA[i] !== l) {
-      if (linesA[i]) {
-        diffOut.appendChild(el('div', { class: 'diff-line diff-removed' }, ['- ' + linesA[i]]));
-        del++;
-      }
-      diffOut.appendChild(el('div', { class: 'diff-line diff-added' }, ['+ ' + l]));
+      if (linesA[i] !== undefined) { rows.push(['diff-removed', '- ' + linesA[i]]); del++; }
+      rows.push(['diff-added', '+ ' + l]);
       add++;
     } else {
-      diffOut.appendChild(el('div', { class: 'diff-line' }, ['  ' + l]));
+      rows.push(['', '  ' + l]);
     }
   });
+
+  State.diffRows = rows;
+  State.diffShown = 0;
+  $('diff-output').replaceChildren();
+  growDiff();
   $('diff-summary').textContent = `DIFF SUMMARY: +${add} additions, -${del} deletions`;
+}
+
+function growDiff() {
+  const rows = State.diffRows || [];
+  const from = State.diffShown || 0;
+  const to = Math.min(from + DIFF_CHUNK, rows.length);
+  const out = $('diff-output');
+  out.querySelectorAll('.diff-more').forEach((n) => n.remove());
+  if (from >= to) return;
+
+  const frag = document.createDocumentFragment();
+  for (let i = from; i < to; i++) {
+    frag.appendChild(el('div', { class: 'diff-line ' + rows[i][0] }, [rows[i][1]]));
+  }
+  out.appendChild(frag);
+  State.diffShown = to;
+
+  if (to < rows.length) {
+    const more = el('div', { class: 'diff-more' });
+    const btn = el('button', { class: 'btn btn-yellow', type: 'button' },
+      ['LOAD MORE · ' + to.toLocaleString() + ' / ' + rows.length.toLocaleString() + ' LINES']);
+    btn.addEventListener('click', () => { growDiff(); haptic(); });
+    more.appendChild(btn);
+    out.appendChild(more);
+  }
 }
 
 /* Drag-and-drop does not exist on a touch screen, so each diff slot is also
